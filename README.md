@@ -4,7 +4,7 @@
 
 Mallow is a hamster who lives next to your Claude Code sessions. He runs his wheel while Claude works, and a baby hamster joins him for every subagent or parallel thread. When it's your turn, he waves. When something wastes your usage, like a cache going cold or a huge tool result, he holds up a sign until you click him and say "Got it".
 
-Under the room you get a report of your past sessions, an **Export for Claude** button that writes a short list of fixes you can paste into a project, and an optional **harness** that trims wasteful tool calls before they run.
+Under the room you get a report of your past sessions, an **Export for Claude** button that writes a short list of fixes you can paste into a project, and **Usage helpers**: reminders at the moments that matter, a few Claude Code settings that cut background requests, and an optional hook that trims oversized tool results.
 
 Everything runs on your computer. Mallow reads the session files Claude Code already saves in `~/.claude/projects`. It never sends anything anywhere, and it never makes a model call, so it doesn't use any of your Claude usage.
 
@@ -34,7 +34,8 @@ Mallow quits by itself a few minutes after you close its window.
 | Baby hamsters on the wheel | Subagents or parallel threads are running |
 | Mallow waving at the door | Claude finished and it's your turn |
 | Mallow holding a sign | Something wasted usage. Click him to see what and how to avoid it |
-| A beetle on the floor | A tool call failed |
+| A beetle on the floor | A command Claude ran failed |
+| A yellow tip under the session | A good moment to save usage, like a big session that's ready for /clear |
 
 Three themes: **Day**, **Night**, and **Knight**, where Mallow and the babies fight a dragon instead of running the wheel. **Auto** follows your clock.
 
@@ -44,40 +45,52 @@ If you have several sessions open, use the picker above the session card to choo
 
 ## What a cold cache is
 
-Claude Code keeps your conversation in a prompt cache so each new message only pays a small "cache read" price for everything that came before. The cache expires after about 5 minutes without activity (some setups use 1 hour). The next message after that has to write the whole conversation into the cache again, which costs roughly 12 to 20 times more than reading it. In a long session that one message can cost as much as dozens of normal ones.
+Claude Code keeps your conversation in a prompt cache so each new message only pays a small "cache read" price for everything that came before. On a Claude subscription the cache lasts an hour without activity (5 minutes on the API, or once you're drawing on usage credits). The next message after that has to write the whole conversation into the cache again, which costs roughly 12 to 20 times more than reading it. In a long session that one message can cost as much as dozens of normal ones.
 
 You can't stop the cache from expiring, but you can stop paying for it by accident:
 
 - Mallow warns you shortly before the cache expires (a bubble, plus a Windows notification if his window isn't in front), so you can reply while it's still warm.
-- If you're stepping away for a while from a long session, start a fresh session when you come back instead of resuming the big one. Ask Claude for a short handoff note first if you need continuity.
+- Once it has expired on a big session, Mallow shows a tip: if you're starting something new, /clear or a new session costs nothing. If you're picking the work back up, Claude Code may offer to continue from a summary instead of the full history.
 
-## The harness
+## Usage helpers
 
-The harness is a Claude Code `PreToolUse` hook (`harness.py`). It is off until you click **Turn on** in the Harness panel. Turning it on adds one entry to `~/.claude/settings.json` and backs that file up to `~/.mallow` first. **Turn off** removes only Mallow's entry.
+The **Usage helpers** panel collects everything Mallow can do to stretch your limit. None of it makes model calls, and none of it changes how Claude thinks.
+
+### Reminders
+
+Some of the biggest savings depend on a choice only you can make, so Mallow points them out at the right moment instead of guessing:
+
+- **Cache about to go cold.** A bubble, plus a Windows notification if Mallow's window is in the background.
+- **Good time to /clear.** When Claude finishes a turn and the session is carrying 100k tokens or more, Mallow suggests /clear if your next task is unrelated. Every message re-sends the whole conversation, so old context from a finished task costs on every turn and doesn't help the next one.
+- **Claude going in circles.** When the same step fails 3 times in a row, or 5 of the last 6 tool calls fail, Mallow holds up his sign. Stopping and redirecting early is cheaper than letting Claude keep retrying.
+- **Same file read again and again, and huge tool results.** These show up as signs too, with the fix to paste into the project.
+
+### Claude Code settings
+
+Switches that cut requests Claude Code makes in the background. Each one edits `~/.claude/settings.json` (backed up to `~/.mallow` first), remembers what was there, and puts it back exactly when you switch it off.
+
+- **No prompt suggestions** (recommended): turns off the grey "next message" guess, which is a small extra request after every reply.
+- **No idle goal check-ins**: only matters if you use /goal. Claude checks on background work when you next type instead of on its own.
+- **Hold messages from other sessions**: only matters if your sessions message each other. Leave it off if they coordinate on their own.
+
+### Trims
+
+A Claude Code `PreToolUse` hook (`harness.py`). It is off until you click **Turn on** in the Trims section. Turning it on adds one entry to `~/.claude/settings.json` and backs that file up to `~/.mallow` first. **Turn off** removes only Mallow's entry.
 
 What it does:
 
 - **Big files are read in parts.** When Claude reads a file over 60 KB with more than 600 lines and no line range, it reads the first 600 lines and gets a one-line note saying how to read more.
-- **Build and test logs get shortened.** When a build, test or install command (npm test, cargo build, gradlew, pytest and the like) printed a huge log at least twice before in the same project, Claude sees the lines that mention errors plus the last 60 lines. The full log is saved in `~/.mallow/out` for two days, and Claude is told where, so it can read more without running the command again. Exit codes are kept, so failures still show as failures. Each command has its own switch.
+- **Build and test logs get shortened.** When a build, test or install command (npm test, cargo build, gradlew, pytest and the like) printed a huge log at least twice in your history, and only in the projects where that happened, Claude sees the lines that mention errors plus the last 60 lines. The full log is saved in `~/.mallow/out` for two days, and Claude is told where, so it can read more without running the command again. Exit codes are kept, so failures still show as failures. Each command has its own switch.
 - **Commands whose output is the point are never touched.** cat, sed, grep, git diff, scripts and anything piped are left alone, because Claude ran them to read that output.
 
-What it never does: approve anything (your permission prompts work exactly as before), change commands that already filter their output, touch background commands, or call a model. If anything goes wrong inside the hook, the tool call goes ahead untouched.
+What it never does: approve anything (your permission prompts still apply; one side effect is that a shortened command no longer matches an allow rule like `Bash(npm test:*)`, so Claude Code may ask before running it), change commands that already filter their output, touch background commands, or call a model. If anything goes wrong inside the hook, the tool call goes ahead untouched.
 
-### What is verified and what isn't
-
-| Claim | Status |
-| --- | --- |
-| Mallow and the harness make no model calls | Verified: there is no network code that talks to a model |
-| The hook only changes the calls described above | Verified by tests on sample inputs |
-| Trimmed calls still go through permission prompts | Based on the Claude Code hook docs. Mallow checks your transcripts after you turn it on and shows how many trims actually took effect |
-| It saves usage | Not proven in general. The panel replays your own saved sessions and shows two numbers: the saving if Claude never needed the trimmed part, and the cost if every trim sent Claude back for the rest. Your real result is somewhere between them, and after a few days the panel shows which trims Claude had to follow up on |
-
-If the second number is bigger than the first for you, leave the harness off. The rest of Mallow works the same either way.
+Trims are the one helper that can backfire: if Claude needs the part that was cut, it goes back for it, and that costs more than the trim saved. The panel replays your own saved sessions and shows two numbers, the saving if Claude never needed the cut part and the cost if it always did. If the second is bigger, leave trims off. After you turn them on, the panel also shows how many trims Claude had to follow up on.
 
 ## Privacy
 
 - Mallow only listens on `127.0.0.1`, so other computers can't reach it.
-- It reads `~/.claude/projects` and writes only to `~/.mallow` (its settings and logs) and, if you turn the harness on, one entry in `~/.claude/settings.json`.
+- It reads `~/.claude/projects`. It writes to `~/.mallow` (its settings, logs and saved build logs), to `~/.claude/settings.json` only when you switch a helper on, and to a desktop or Startup shortcut only when you ask for one.
 - The Export for Claude button copies text to your clipboard or saves it as a file. Nothing is uploaded.
 
 ## Folder layout
@@ -88,6 +101,7 @@ harness.py       the Claude Code hook
 web/             the page, artwork and fonts
 runtime/python/  Python 3.12 for Windows, with pywebview for the app window
 tools/           build_sprites.py, which cuts new art sheets into web/sprites
+tests/           quick checks: python -m unittest discover tests
 ```
 
 To swap in new art, put the PNG sheets and `asset-manifest.json` in a folder and run `python tools/build_sprites.py path/to/folder`.

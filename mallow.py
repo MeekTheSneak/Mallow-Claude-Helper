@@ -12,7 +12,7 @@ he holds up a sign when something wasteful happens, until you acknowledge it.
 Below the room is a report of past sessions and an "Export for Claude" brief.
 
 Everything stays on this computer. The page is served only to 127.0.0.1, and
-Mallow never contacts Claude or anything else. Python 3.8+, standard library.
+Mallow never contacts Claude or anything else. Python 3.9+, standard library.
 
     python mallow.py              # start and open the page
     python mallow.py --no-open    # start without opening a browser
@@ -38,7 +38,7 @@ WEB = Path(getattr(sys, "_MEIPASS", HERE)) / "web"   # also works when bundled i
 STATE_DIR = Path.home() / ".mallow"
 STATE_FILE = STATE_DIR / "state.json"
 DEFAULT_PORT = 47321
-VERSION = 4                      # bumped on each release; a newer Mallow asks an older running one to step aside
+VERSION = 5                      # bumped on each release; a newer Mallow asks an older running one to step aside
 IDLE_EXIT_SECONDS = 180          # quit when no page has asked for anything for this long
 LIVE_WINDOW_SECONDS = 6 * 3600   # files touched this recently are watched live
 
@@ -207,96 +207,133 @@ def is_prompt_text(t):
     return bool(t) and not t.startswith("<") and not t.startswith("[Request interrupted")
 
 
-def load_sessions(root):
+def parse_file(path):
+    """One transcript file into Session pieces keyed by session id. A session can span several files
+    (its subagents, or a resumed copy), so pieces are merged later and duplicate calls dropped there."""
     sessions = {}
     seen_msgs = set()
-    for path in sorted(root.rglob("*.jsonl")):
-        is_sub_file = "subagents" in path.parts
-        try:
-            fh = path.open("r", encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-        with fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rec = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if not isinstance(rec, dict):
-                    continue
-                sid = rec.get("sessionId") or path.stem
-                s = sessions.get(sid)
-                if s is None:
-                    s = sessions[sid] = Session(sid)
-                ts = parse_ts(rec.get("timestamp"))
-                s.touch(ts)
-                if rec.get("cwd") and not s.cwd:
-                    s.cwd = rec["cwd"]
-                if rec.get("gitBranch") and not s.branch:
-                    s.branch = rec["gitBranch"]
-                sub = is_sub_file or bool(rec.get("isSidechain"))
-                rtype = rec.get("type")
-                if rtype == "summary" and rec.get("summary"):
-                    s.summary = rec["summary"]
-                    continue
-                if rec.get("isCompactSummary") or (rtype == "system" and rec.get("subtype") == "compact_boundary"):
-                    if ts:
-                        s.compactions.append(ts)
-                    continue
-                msg = rec.get("message")
-                if not isinstance(msg, dict):
-                    continue
-                content = msg.get("content")
-                if rtype == "assistant":
-                    key = (msg.get("id"), rec.get("requestId"))
-                    usage = msg.get("usage") or {}
-                    if key not in seen_msgs and usage and key != (None, None):
-                        seen_msgs.add(key)
-                        cc = usage.get("cache_creation") or {}
-                        cw_total = usage.get("cache_creation_input_tokens", 0) or 0
-                        cw1h = cc.get("ephemeral_1h_input_tokens", 0) or 0
-                        cw5 = cc.get("ephemeral_5m_input_tokens", cw_total - cw1h) or 0
-                        s.calls.append({
-                            "ts": ts, "model": msg.get("model") or "unknown",
-                            "in": usage.get("input_tokens", 0) or 0, "cw5": cw5, "cw1h": cw1h,
-                            "cr": usage.get("cache_read_input_tokens", 0) or 0,
-                            "out": usage.get("output_tokens", 0) or 0, "sub": sub,
-                        })
-                    if isinstance(content, list):
-                        for b in content:
-                            if isinstance(b, dict) and b.get("type") == "tool_use":
-                                name = b.get("name", "?")
-                                inp = b.get("input") or {}
-                                s.tools[b.get("id")] = (name, tool_target(inp), sub)
-                                if isinstance(inp, dict):
-                                    s.tinfo[b.get("id")] = {"ranged": bool(inp.get("offset") or inp.get("limit")), "cmd": str(inp.get("command") or "")[:300],
-                                                              "bg": bool(inp.get("run_in_background"))}
-                                s.tool_counts[name] += 1
-                                if name == "Read" and not sub and isinstance(inp, dict) and inp.get("file_path"):
-                                    s.reads[inp["file_path"]] += 1
-                elif rtype == "user":
-                    if isinstance(content, str):
-                        if not rec.get("isMeta") and not sub and is_prompt_text(content.strip()):
-                            s.prompts += 1
-                            if not s.title:
-                                s.title = content.strip().splitlines()[0][:90]
-                    elif isinstance(content, list):
-                        for b in content:
-                            if not isinstance(b, dict):
-                                continue
-                            if b.get("type") == "tool_result":
-                                s.results.append((b.get("tool_use_id"), text_len(b.get("content")), ts, sub))
-                                s.rmeta[b.get("tool_use_id")] = {"lines": text_lines(b.get("content")), "err": bool(b.get("is_error"))}
-                            elif b.get("type") == "text" and not sub and not rec.get("isMeta"):
-                                t = b.get("text", "").strip()
-                                if is_prompt_text(t):
-                                    s.prompts += 1
-                                    if not s.title:
-                                        s.title = t.splitlines()[0][:90]
+    is_sub_file = "subagents" in path.parts
+    try:
+        fh = path.open("r", encoding="utf-8", errors="replace")
+    except OSError:
+        return sessions
+    with fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(rec, dict):
+                continue
+            sid = rec.get("sessionId") or path.stem
+            s = sessions.get(sid)
+            if s is None:
+                s = sessions[sid] = Session(sid)
+            ts = parse_ts(rec.get("timestamp"))
+            s.touch(ts)
+            if rec.get("cwd") and not s.cwd:
+                s.cwd = rec["cwd"]
+            if rec.get("gitBranch") and not s.branch:
+                s.branch = rec["gitBranch"]
+            sub = is_sub_file or bool(rec.get("isSidechain"))
+            rtype = rec.get("type")
+            if rtype == "summary" and rec.get("summary"):
+                s.summary = rec["summary"]
+                continue
+            if rec.get("isCompactSummary") or (rtype == "system" and rec.get("subtype") == "compact_boundary"):
+                if ts:
+                    s.compactions.append(ts)
+                continue
+            msg = rec.get("message")
+            if not isinstance(msg, dict):
+                continue
+            content = msg.get("content")
+            if rtype == "assistant":
+                key = (msg.get("id"), rec.get("requestId"))
+                usage = msg.get("usage") or {}
+                if key not in seen_msgs and usage and key != (None, None):
+                    seen_msgs.add(key)
+                    cc = usage.get("cache_creation") or {}
+                    cw_total = usage.get("cache_creation_input_tokens", 0) or 0
+                    cw1h = cc.get("ephemeral_1h_input_tokens", 0) or 0
+                    cw5 = cc.get("ephemeral_5m_input_tokens", cw_total - cw1h) or 0
+                    s.calls.append({
+                        "key": key, "ts": ts, "model": msg.get("model") or "unknown",
+                        "in": usage.get("input_tokens", 0) or 0, "cw5": cw5, "cw1h": cw1h,
+                        "cr": usage.get("cache_read_input_tokens", 0) or 0,
+                        "out": usage.get("output_tokens", 0) or 0, "sub": sub,
+                    })
+                if isinstance(content, list):
+                    for b in content:
+                        if isinstance(b, dict) and b.get("type") == "tool_use":
+                            name = b.get("name", "?")
+                            inp = b.get("input") or {}
+                            s.tools[b.get("id")] = (name, tool_target(inp), sub)
+                            if isinstance(inp, dict):
+                                s.tinfo[b.get("id")] = {"ranged": bool(inp.get("offset") or inp.get("limit")), "cmd": str(inp.get("command") or "")[:300],
+                                                          "bg": bool(inp.get("run_in_background"))}
+                            s.tool_counts[name] += 1
+                            if name == "Read" and not sub and isinstance(inp, dict) and inp.get("file_path"):
+                                s.reads[inp["file_path"]] += 1
+            elif rtype == "user":
+                if isinstance(content, str):
+                    if not rec.get("isMeta") and not sub and is_prompt_text(content.strip()):
+                        s.prompts += 1
+                        if not s.title:
+                            s.title = content.strip().splitlines()[0][:90]
+                elif isinstance(content, list):
+                    for b in content:
+                        if not isinstance(b, dict):
+                            continue
+                        if b.get("type") == "tool_result":
+                            s.results.append((b.get("tool_use_id"), text_len(b.get("content")), ts, sub))
+                            s.rmeta[b.get("tool_use_id")] = {"lines": text_lines(b.get("content")), "err": bool(b.get("is_error"))}
+                        elif b.get("type") == "text" and not sub and not rec.get("isMeta"):
+                            t = b.get("text", "").strip()
+                            if is_prompt_text(t):
+                                s.prompts += 1
+                                if not s.title:
+                                    s.title = t.splitlines()[0][:90]
     return sessions
+
+
+def merge_pieces(sid, pieces):
+    """Join the pieces of one session from several files, counting each model call once."""
+    out = Session(sid)
+    seen = set()
+    for pc in pieces:
+        for ts in (pc.first_ts, pc.last_ts):
+            out.touch(ts)
+        out.cwd = out.cwd or pc.cwd
+        out.branch = out.branch or pc.branch
+        out.title = out.title or pc.title
+        out.summary = pc.summary or out.summary
+        for c in pc.calls:
+            if c["key"] in seen:
+                continue
+            seen.add(c["key"])
+            out.calls.append(c)
+        out.tools.update(pc.tools)
+        out.tinfo.update(pc.tinfo)
+        out.rmeta.update(pc.rmeta)
+        out.results.extend(pc.results)
+        out.reads.update(pc.reads)
+        out.tool_counts.update(pc.tool_counts)
+        out.compactions.extend(pc.compactions)
+        out.prompts += pc.prompts
+    return out
+
+
+def load_sessions(root):
+    """Every session under root (used by tests and one-off reports; the app uses ReportCache)."""
+    pieces = defaultdict(list)
+    for path in sorted(root.rglob("*.jsonl")):
+        for sid, pc in parse_file(path).items():
+            pieces[sid].append(pc)
+    return {sid: merge_pieces(sid, pcs) for sid, pcs in pieces.items()}
 
 
 def call_cost(c):
@@ -428,10 +465,18 @@ def analyze(s):
 
 
 class ReportCache:
+    """The history report, kept up to date cheaply: each file is parsed once and again only when it changes,
+    and only the sessions those files belong to are rebuilt. Old sessions keep their summary but drop the
+    per-call detail, which is only needed for the replay of recent sessions."""
+    DETAIL_DAYS = 30
+
     def __init__(self, root):
         self.root = root
         self.lock = threading.Lock()
-        self.key = None
+        self.files = {}          # path -> {"key": (size, mtime), "sids": set}
+        self.pieces = {}         # sid -> {path: Session piece}
+        self.analyzed = {}       # sid -> analyze() result
+        self.merged = {}         # sid -> merged Session (recent sessions only)
         self.data = None
         self.raw = []
         self.built = 0
@@ -441,19 +486,64 @@ class ReportCache:
             now = time.time()
             if self.data is not None and now - self.built < 60:
                 return self.data
-            key = None
-            try:
-                stats = [p.stat() for p in self.root.rglob("*.jsonl")]
-                key = (len(stats), max((st.st_mtime for st in stats), default=0))
-            except OSError:
-                pass
-            if self.data is None or key != self.key:
-                self.raw = [s for s in load_sessions(self.root).values() if s.calls] if self.root.exists() else []
-                sessions = [analyze(s) for s in self.raw]
-                self.data = {"generated": datetime.now(timezone.utc).isoformat(),
-                             "sessions": [s for s in sessions if s["end"]]}
-                self.key = key
             self.built = now
+            changed = set()
+            seen_paths = set()
+            if self.root.exists():
+                for dirpath, _dirs, names in os.walk(self.root):
+                    for fn in names:
+                        if not fn.endswith(".jsonl"):
+                            continue
+                        path = os.path.join(dirpath, fn)
+                        try:
+                            st = os.stat(path)
+                        except OSError:
+                            continue
+                        seen_paths.add(path)
+                        key = (st.st_size, st.st_mtime)
+                        old = self.files.get(path)
+                        if old and old["key"] == key:
+                            continue
+                        for sid in (old or {}).get("sids", ()):
+                            self.pieces.get(sid, {}).pop(path, None)
+                            changed.add(sid)
+                        parsed = parse_file(Path(path))
+                        for sid, pc in parsed.items():
+                            self.pieces.setdefault(sid, {})[path] = pc
+                            changed.add(sid)
+                        self.files[path] = {"key": key, "sids": set(parsed)}
+            for path in [p for p in self.files if p not in seen_paths]:     # deleted files
+                for sid in self.files.pop(path)["sids"]:
+                    self.pieces.get(sid, {}).pop(path, None)
+                    changed.add(sid)
+            if self.data is not None and not changed:
+                return self.data
+            cutoff = now - self.DETAIL_DAYS * 86400
+            for sid in changed:
+                pcs = self.pieces.get(sid) or {}
+                for path, pc in list(pcs.items()):      # a slimmed-down old piece needs its detail back
+                    if getattr(pc, "light", False):
+                        fresh = parse_file(Path(path)).get(sid)
+                        if fresh:
+                            pcs[path] = fresh
+                if not pcs:
+                    self.pieces.pop(sid, None); self.analyzed.pop(sid, None); self.merged.pop(sid, None)
+                    continue
+                m = merge_pieces(sid, [pcs[p] for p in sorted(pcs)])
+                if not m.calls:
+                    self.analyzed.pop(sid, None); self.merged.pop(sid, None)
+                    continue
+                self.analyzed[sid] = analyze(m)
+                if m.last_ts and m.last_ts.timestamp() >= cutoff:
+                    self.merged[sid] = m
+                else:                                   # old session: keep the summary, drop the detail
+                    self.merged.pop(sid, None)
+                    for pc in pcs.values():
+                        pc.results, pc.tools, pc.tinfo, pc.rmeta = [], {}, {}, {}
+                        pc.light = True
+            self.raw = list(self.merged.values())
+            self.data = {"generated": datetime.now(timezone.utc).isoformat(), "root": str(self.root),
+                         "sessions": [a for a in self.analyzed.values() if a["end"]]}
             return self.data
 
 
@@ -487,6 +577,7 @@ class LiveFile:
         self.files = set()
         self.bash_failing = False
         self.reads = Counter()
+        self.recent = []             # (tool, label, failed) for the last few tool results in the main thread
         self.launches = []           # (ts, type, description) for Agent tool calls
         self.ended_at = None
         self.last_status = None
@@ -589,32 +680,65 @@ class Watcher:
         self.emit(lf, rec_ts, "incident", kind=kind)
 
     # -- scanning --
+    FULL_SCAN_EVERY = 15        # seconds between walks of the whole folder; known live files are checked every second
+    FIRST_READ_MAX = 32 << 20   # a long transcript opened for the first time: only its last 32 MB matter for live state
+
     def scan(self):
         now = time.time()
         if not self.root.exists():
             return
-        for dirpath, _dirs, filenames in os.walk(self.root):
-            for fn in filenames:
-                if not fn.endswith(".jsonl"):
-                    continue
-                p = os.path.join(dirpath, fn)
+        if now - getattr(self, "_walked", 0) >= self.FULL_SCAN_EVERY:
+            self._walked = now
+            found = []
+            for dirpath, _dirs, filenames in os.walk(self.root):
+                for fn in filenames:
+                    if fn.endswith(".jsonl"):
+                        found.append(os.path.join(dirpath, fn))
+            paths = found
+            with self.lock:                             # forget files that went quiet long ago
+                for p, lf in list(self.files.items()):
+                    if now - lf.mtime > LIVE_WINDOW_SECONDS and lf.status(now) == "idle":
+                        del self.files[p]
+        else:
+            with self.lock:
+                paths = set(self.files)
+                live = [lf for lf in self.files.values() if now - lf.mtime < 3600]
+            # new sessions and new subagents usually appear next to files that are already live
+            dirs = set()
+            for lf in live:
+                d = os.path.dirname(lf.path)
+                dirs.add(d)
+                if not lf.is_sub:
+                    dirs.add(os.path.join(d, Path(lf.path).stem, "subagents"))
+            for d in dirs:
                 try:
-                    st = os.stat(p)
+                    with os.scandir(d) as it:
+                        paths.update(e.path for e in it if e.name.endswith(".jsonl"))
                 except OSError:
                     continue
-                if now - st.st_mtime > LIVE_WINDOW_SECONDS:
-                    continue
-                lf = self.files.get(p)
-                if lf is None:
-                    parts = Path(p).parts
-                    is_sub = "subagents" in parts
-                    parent = Path(p).parent.parent.name if is_sub else None
-                    lf = self.files[p] = LiveFile(p, is_sub, parent)
-                if st.st_size < lf.offset:          # file was rewritten
-                    lf.offset, lf.partial = 0, b""
-                if st.st_size > lf.offset:
-                    self._read(lf)
-                lf.mtime = st.st_mtime
+        for p in paths:
+            try:
+                st = os.stat(p)
+            except OSError:
+                continue
+            if now - st.st_mtime > LIVE_WINDOW_SECONDS:
+                continue
+            lf = self.files.get(p)
+            if lf is None:
+                parts = Path(p).parts
+                is_sub = "subagents" in parts
+                parent = Path(p).parent.parent.name if is_sub else None
+                lf = LiveFile(p, is_sub, parent)
+                if st.st_size > self.FIRST_READ_MAX:
+                    lf.offset = st.st_size - self.FIRST_READ_MAX
+                    lf.skip_partial = True
+                with self.lock:
+                    self.files[p] = lf
+            if st.st_size < lf.offset:          # file was rewritten
+                lf.offset, lf.partial = 0, b""
+            if st.st_size > lf.offset:
+                self._read(lf)
+            lf.mtime = st.st_mtime
         # turn-end detection for files that went quiet after a text reply
         with self.lock:
             for lf in self.files.values():
@@ -636,6 +760,9 @@ class Watcher:
         data = lf.partial + chunk
         lines = data.split(b"\n")
         lf.partial = lines.pop()
+        if getattr(lf, "skip_partial", False):      # started mid-file: the first line is a fragment
+            lf.skip_partial = False
+            lines = lines[1:]
         with self.lock:
             for raw in lines:
                 raw = raw.strip()
@@ -729,6 +856,8 @@ class Watcher:
                         if lf.reads[tgt] == 3:
                             self.incident(lf, ts, "reread", "Same file, third read",
                                           f"{short_path(tgt)} has now been read 3 times this session. An outline of it in CLAUDE.md usually stops this.")
+                    if not side:
+                        self._stuck_check(lf, ts, name, info["label"], err)
                     if not side and toks >= LIVE_BIG_RESULT_TOKENS:
                         self.incident(lf, ts, "big_result", "A huge tool result",
                                       f"{info['label']} returned about {toks:,} tokens. It now rides along on every later turn.")
@@ -779,6 +908,21 @@ class Watcher:
             else:
                 lf.last_kind = "assistant_text"
 
+    def _stuck_check(self, lf, ts, name, label, err):
+        """Claude retrying the same failing thing burns a full conversation's worth of usage each time."""
+        lf.recent = (lf.recent + [(name, label, err)])[-6:]
+        last3 = lf.recent[-3:]
+        if len(last3) == 3 and all(e for _, _, e in last3) and len({(n, l) for n, l, _ in last3}) == 1:
+            self.incident(lf, ts, "stuck", "Claude keeps hitting the same error",
+                          f"The same step failed 3 times in a row ({label}). If Claude isn't getting closer, press Esc and "
+                          f"point it in a new direction. Every retry re-sends the whole conversation.")
+            lf.recent = []                          # start counting again, so one bad stretch is one alert
+        elif len(lf.recent) == 6 and sum(1 for *_, e in lf.recent if e) >= 5:
+            self.incident(lf, ts, "stuck", "Lots of failures in a row",
+                          "5 of Claude's last 6 tool calls failed. If it's going in circles, press Esc and redirect it "
+                          "before it spends more.")
+            lf.recent = []
+
     # -- snapshot for the page --
     def snapshot(self, since, want=None):
         now = time.time()
@@ -807,6 +951,9 @@ class Watcher:
                     "id": focus.sid, "title": focus.summary or focus.title or "Current session",
                     "project": focus.cwd or "", "branch": focus.branch or "", "status": st,
                     "activity": focus.current_activity() if st == "working" else None,
+                    # transcripts don't record permission prompts; a tool that's quiet for a while may be one
+                    "quiet": st == "working" and now - focus.active_at() > 20
+                             and any(i["name"] not in AGENT_TOOLS for i in focus.pending.values()),
                     "turnStart": focus.turn_start.timestamp() if focus.turn_start else None,
                     "model": pretty_model(model),
                     "ctx": ctx_tokens, "ctxWindow": window,
@@ -882,10 +1029,8 @@ def hook_python():
 
 
 def hook_entry():
-    py, script = hook_python().as_posix(), HARNESS_SCRIPT.as_posix()
-    if " " in py or " " in script:          # exec form needs no shell quoting
-        return {"type": "command", "command": py, "args": [script], "timeout": 10}
-    return {"type": "command", "command": f"{py} {script}", "timeout": 10}
+    """Exec form (program plus args): no shell is involved, so spaces, quotes or & in a path can't break it."""
+    return {"type": "command", "command": hook_python().as_posix(), "args": [HARNESS_SCRIPT.as_posix()], "timeout": 10}
 
 
 def is_mallow_hook(h):
@@ -940,6 +1085,16 @@ class Harness:
             known[c["key"]] = {**c, "enabled": old.get("enabled", True) if old else True,
                                "tail": (old or {}).get("tail", r["bash"].get("tail", 60))}
         r["bash"]["commands"] = sorted(known.values(), key=lambda c: -c.get("avg_tokens", 0))
+        # the hook only reads the file, so newly learned (or dropped) rules have to be written out to take effect
+        try:
+            on_disk = json.loads(RULES_FILE.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            on_disk = None
+        if on_disk != r:
+            try:
+                self.save_rules(r)
+            except OSError:
+                pass
         return r
 
     def save_rules(self, r):
@@ -951,18 +1106,25 @@ class Harness:
     # -- install into Claude Code --
     def installed(self):
         try:
-            data = json.loads(claude_settings_path().read_text(encoding="utf-8"))
+            data = json.loads(claude_settings_path().read_text(encoding="utf-8-sig"))
         except (OSError, ValueError):
             return False
-        for group in (data.get("hooks") or {}).get("PreToolUse", []) or []:
-            if any(is_mallow_hook(h) for h in group.get("hooks", [])):
+        hooks = data.get("hooks") if isinstance(data, dict) else None
+        for group in (hooks if isinstance(hooks, dict) else {}).get("PreToolUse", []) or []:
+            if isinstance(group, dict) and any(is_mallow_hook(h) for h in group.get("hooks", []) or []):
                 return True
         return False
 
     def _edit_settings(self, change):
+        """Change ~/.claude/settings.json safely: back it up, refuse anything unreadable, write atomically,
+        follow a symlink to the real file, and report problems instead of crashing."""
         path = claude_settings_path()
         try:
-            text = path.read_text(encoding="utf-8")
+            real = path.resolve()                    # a symlinked settings file stays a symlink
+        except OSError:
+            real = path
+        try:
+            text = real.read_text(encoding="utf-8-sig")   # Notepad may add a byte-order mark
             data = json.loads(text) if text.strip() else {}
         except FileNotFoundError:
             text, data = "", {}
@@ -970,21 +1132,36 @@ class Harness:
             return False, "Your Claude Code settings file has something Mallow can't read, so he left it alone."
         except OSError as e:
             return False, f"Couldn't open the Claude Code settings: {e}"
-        if text:
-            STATE_DIR.mkdir(parents=True, exist_ok=True)
-            backup = STATE_DIR / f"settings-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
-            backup.write_text(text, encoding="utf-8")
-        change(data)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".mallow-tmp")
-        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        tmp.replace(path)
+        if not isinstance(data, dict) or not isinstance(data.get("hooks", {}) or {}, dict) \
+                or not isinstance(data.get("env", {}) or {}, dict):
+            return False, "Your Claude Code settings are shaped in a way Mallow doesn't expect, so he left them alone."
+        if data.get("hooks") is None:
+            data.pop("hooks", None)
+        if data.get("env") is None:
+            data.pop("env", None)
+        tmp = real.with_name(real.name + ".mallow-tmp")
+        try:
+            if text:
+                STATE_DIR.mkdir(parents=True, exist_ok=True)
+                backup = STATE_DIR / f"settings-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
+                backup.write_text(text, encoding="utf-8")
+            change(data)
+            real.parent.mkdir(parents=True, exist_ok=True)
+            tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            tmp.replace(real)
+        except (OSError, TypeError, AttributeError) as e:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+            return False, f"Couldn't save the Claude Code settings ({e}). Nothing was changed."
         return True, ""
 
     def install(self):
         def change(data):
             hooks = data.setdefault("hooks", {})
-            groups = [g for g in hooks.get("PreToolUse", []) or [] if not any(is_mallow_hook(h) for h in g.get("hooks", []))]
+            groups = [g for g in hooks.get("PreToolUse", []) or []
+                      if not (isinstance(g, dict) and any(is_mallow_hook(h) for h in g.get("hooks", []) or []))]
             groups.append({"matcher": "Read|Bash", "hooks": [hook_entry()]})
             hooks["PreToolUse"] = groups
         with self.lock:
@@ -998,6 +1175,9 @@ class Harness:
             hooks = data.get("hooks") or {}
             groups = []
             for g in hooks.get("PreToolUse", []) or []:
+                if not isinstance(g, dict):
+                    groups.append(g)
+                    continue
                 g = dict(g)
                 g["hooks"] = [h for h in g.get("hooks", []) if not is_mallow_hook(h)]
                 if g["hooks"]:
@@ -1117,10 +1297,18 @@ class Harness:
         raw = {s.sid: s for s in self.report.raw}
         H = harness_module()
         res = {"checked": 0, "delivered": 0, "notDelivered": 0, "pending": 0, "followedUp": 0}
+        entries = []
         try:
-            entries = [json.loads(l) for l in open(HLOG_FILE, encoding="utf-8") if l.strip()]
-        except (OSError, ValueError):
-            entries = []
+            with open(HLOG_FILE, encoding="utf-8") as fh:
+                for line in fh:
+                    try:
+                        e = json.loads(line)
+                    except ValueError:                  # a half-written line shouldn't hide the rest
+                        continue
+                    if isinstance(e, dict) and "ts" in e and "kind" in e:
+                        entries.append(e)
+        except OSError:
+            pass
         for e in entries[-200:]:
             s = raw.get(e.get("session"))
             if not s:
@@ -1160,7 +1348,87 @@ class Harness:
         return {"installed": self.installed(), "rules": self.rules(), "stats": self.stats(),
                 "measure": self.measure(), "verify": self.verify(),
                 "settingsPath": str(claude_settings_path()), "platform": sys.platform,
-                "startup": startup_enabled()}
+                "startup": startup_enabled(), "tuneups": Tuneups(self).state()}
+
+
+# ===========================================================================
+# Tune-ups: Claude Code settings that cut background usage without touching
+# what Claude sees or how it thinks. Each one is a switch; turning it off puts
+# the setting back exactly as it was.
+# ===========================================================================
+TUNEUPS = [
+    {"id": "suggestions", "key": "promptSuggestionEnabled", "on": False, "recommended": True,
+     "title": "No prompt suggestions",
+     "desc": "Claude Code stops guessing your next message after each reply. Each guess is a small extra request on the whole conversation. You lose the grey suggested text in the input box."},
+    {"id": "checkins", "env": "CLAUDE_CODE_GOAL_CHECKIN_MINUTES", "on": "0", "recommended": False,
+     "title": "No idle goal check-ins",
+     "desc": "Only matters if you use /goal. While you're away, Claude won't start turns on its own to check background work. It checks when you next type."},
+    {"id": "inbound", "key": "crossSessionInbound", "on": "hold", "recommended": False,
+     "title": "Hold messages from other sessions",
+     "desc": "Only matters if your sessions message each other. An idle session shows a notice instead of starting a turn. Leave this off if your sessions coordinate on their own."},
+]
+TUNE_FILE = STATE_DIR / "tuneups.json"
+
+
+class Tuneups:
+    def __init__(self, harness):
+        self.h = harness
+
+    def _saved(self):
+        try:
+            return json.loads(TUNE_FILE.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+    def _current(self, data, t):
+        if "env" in t:
+            env = data.get("env") or {}
+            return (t["env"] in env, env.get(t["env"]))
+        return (t["key"] in data, data.get(t["key"]))
+
+    def state(self):
+        try:
+            data = json.loads(claude_settings_path().read_text(encoding="utf-8-sig") or "{}")
+        except (OSError, ValueError):
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        out = []
+        for t in TUNEUPS:
+            has, val = self._current(data, t)
+            out.append({"id": t["id"], "title": t["title"], "desc": t["desc"], "recommended": t["recommended"],
+                        "on": has and val == t["on"]})
+        return out
+
+    def set(self, tid, on):
+        t = next((x for x in TUNEUPS if x["id"] == tid), None)
+        if not t:
+            return False, "unknown setting"
+        saved = self._saved()
+
+        def change(data):
+            has, val = self._current(data, t)
+            box = data.setdefault("env", {}) if "env" in t else data
+            name = t["env"] if "env" in t else t["key"]
+            if on:
+                if not (has and val == t["on"]):
+                    saved[tid] = {"had": has, "prev": val}       # remember exactly what was there
+                box[name] = t["on"]
+            else:
+                prev = saved.pop(tid, {"had": False, "prev": None})
+                if prev.get("had"):
+                    box[name] = prev.get("prev")
+                else:
+                    box.pop(name, None)
+                if "env" in t and not box:
+                    data.pop("env", None)
+
+        with self.h.lock:
+            ok, msg = self.h._edit_settings(change)
+            if ok:
+                STATE_DIR.mkdir(parents=True, exist_ok=True)
+                TUNE_FILE.write_text(json.dumps(saved, indent=1), encoding="utf-8")
+            return ok, msg
 
 
 def harness_module():
@@ -1179,14 +1447,15 @@ def notify(title, body):
     if not sys.platform.startswith("win"):
         return
     import subprocess
-    t, b = (str(x).replace("'", "''")[:200] for x in (title, body))
+    # the text travels in environment variables, so nothing in it (quotes of any kind) can change the script
+    env = {**os.environ, "MALLOW_T": str(title)[:200], "MALLOW_B": str(body)[:300]}
     ps = ("[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null;"
           "$x = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02);"
-          f"$n = $x.GetElementsByTagName('text'); $n.Item(0).AppendChild($x.CreateTextNode('{t}')) > $null; $n.Item(1).AppendChild($x.CreateTextNode('{b}')) > $null;"
+          "$n = $x.GetElementsByTagName('text'); $n.Item(0).AppendChild($x.CreateTextNode($env:MALLOW_T)) > $null; $n.Item(1).AppendChild($x.CreateTextNode($env:MALLOW_B)) > $null;"
           "$app = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe';"
           "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($app).Show([Windows.UI.Notifications.ToastNotification]::new($x))")
     try:
-        subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps],
+        subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps], env=env,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=0x08000000)
     except OSError:
         pass
@@ -1202,26 +1471,25 @@ def startup_enabled():
     return bool(link and link.exists())
 
 
-def ps_quote(text):
-    """A PowerShell single-quoted string."""
-    return "'" + str(text).replace("'", "''") + "'"
-
-
 def make_shortcut(link_expr):
     """Create a Windows shortcut that starts Mallow. link_expr is a PowerShell expression for the .lnk path.
-    It points straight at the windowless Python when there is one, so no console flashes."""
+    It points straight at the windowless Python when there is one, so no console flashes.
+    Paths travel in environment variables, so quotes or other odd characters in them can't break the script."""
     import subprocess
     pyw = Path(sys.executable).with_name("pythonw.exe")
     if pyw.exists():
         target, arg, style = pyw, f'"{HERE / "mallow.py"}" --log "{STATE_DIR / "launch.log"}"', 1
     else:
         target, arg, style = HERE / "Open Mallow (Windows).bat", "", 7
-    ps = (f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut({link_expr});"
-          f"$s.TargetPath={ps_quote(target)};$s.Arguments={ps_quote(arg)};$s.WorkingDirectory={ps_quote(HERE)};"
-          f"$s.IconLocation={ps_quote(str(HERE / 'mallow.ico') + ',0')};$s.WindowStyle={style};"
-          f"$s.Description='Mallow, a hamster who keeps an eye on Claude Code';$s.Save()")
+    env = {**os.environ, "MALLOW_TARGET": str(target), "MALLOW_ARGS": arg, "MALLOW_DIR": str(HERE),
+           "MALLOW_ICON": str(HERE / "mallow.ico") + ",0", "MALLOW_LINK": str(link_expr)}
+    ps = ("$l = if ($env:MALLOW_LINK -eq 'DESKTOP') { Join-Path ([Environment]::GetFolderPath('Desktop')) 'Mallow.lnk' } else { $env:MALLOW_LINK };"
+          "$s=(New-Object -ComObject WScript.Shell).CreateShortcut($l);"
+          "$s.TargetPath=$env:MALLOW_TARGET;$s.Arguments=$env:MALLOW_ARGS;$s.WorkingDirectory=$env:MALLOW_DIR;"
+          f"$s.IconLocation=$env:MALLOW_ICON;$s.WindowStyle={style};"
+          "$s.Description='Mallow, a hamster who keeps an eye on Claude Code';$s.Save()")
     try:
-        r = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
+        r = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], env=env,
                            capture_output=True, timeout=30, creationflags=0x08000000)
         return r.returncode == 0
     except (OSError, subprocess.SubprocessError):
@@ -1238,12 +1506,12 @@ def set_startup(on):
         except OSError:
             pass
         return True
-    make_shortcut(ps_quote(link))
+    make_shortcut(str(link))
     return link.exists()
 
 
 def add_to_desktop():
-    ok = make_shortcut("(Join-Path ([Environment]::GetFolderPath('Desktop')) 'Mallow.lnk')")
+    ok = make_shortcut("DESKTOP")
     print("Mallow is on your desktop. Keep this folder where it is, since the icon points here."
           if ok else "Couldn't make the desktop icon. You can still start Mallow with 'Open Mallow (Windows).bat'.")
 
@@ -1253,7 +1521,7 @@ def add_to_desktop():
 # ===========================================================================
 CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
                  ".css": "text/css; charset=utf-8", ".woff2": "font/woff2", ".svg": "image/svg+xml",
-                 ".png": "image/png", ".ico": "image/x-icon", ".json": "application/json"}
+                 ".png": "image/png", ".jpg": "image/jpeg", ".ico": "image/x-icon", ".json": "application/json"}
 
 
 def make_handler(watcher, report, port, harness):
@@ -1319,10 +1587,12 @@ def make_handler(watcher, report, port, harness):
             if not self._host_ok() or self.headers.get("X-Mallow") != "1":
                 return self._send(403, {"error": "forbidden"})
             watcher.last_request = time.time()
-            length = min(int(self.headers.get("Content-Length") or 0), 10_000)
             try:
+                length = max(0, min(int(self.headers.get("Content-Length") or 0), 10_000))
                 body = json.loads(self.rfile.read(length) or b"{}")
-            except ValueError:
+            except (ValueError, OSError):
+                body = {}
+            if not isinstance(body, dict):
                 body = {}
             if self.path == "/api/harness":
                 act = body.get("action")
@@ -1335,6 +1605,8 @@ def make_handler(watcher, report, port, harness):
                     ok, msg = True, ""
                 elif act == "startup":
                     ok, msg = set_startup(bool(body.get("enabled"))), ""
+                elif act == "tuneup":
+                    ok, msg = Tuneups(harness).set(str(body.get("id")), bool(body.get("enabled")))
                 else:
                     ok, msg = False, "unknown action"
                 return self._send(200, {"ok": ok, "message": msg, **harness.state()})
@@ -1441,6 +1713,9 @@ def open_app_window(url):
     return False
 
 
+NATIVE = {"on": False}         # set while a native window owns Mallow's lifetime
+
+
 def native_window(url):
     """Show Mallow in a real desktop window (pywebview, using the Edge engine Windows already has).
     Blocks until the window is closed. Returns False if pywebview isn't available or can't start."""
@@ -1469,6 +1744,7 @@ def native_window(url):
             webview.settings["SHOW_DEFAULT_MENUS"] = False  # no browser right-click menu in the app
         except Exception:
             pass
+        NATIVE["on"] = True
         webview.create_window("Mallow", url, width=1240, height=900, min_size=(420, 560),
                               background_color="#E8F3EA", text_select=True)
         # private_mode off keeps your theme, hats and other choices between launches
@@ -1476,6 +1752,7 @@ def native_window(url):
                       icon=str(icon) if icon.exists() else None)
         return True
     except Exception as e:
+        NATIVE["on"] = False
         print(f"Native window unavailable ({e}); using a browser window instead.")
         return False
 
@@ -1531,12 +1808,18 @@ def main():
     url = f"http://127.0.0.1:{port}/"
 
     def loop():
+        last = time.time()
         while True:
             try:
                 watcher.scan()
             except Exception:
                 pass
-            if not args.stay and time.time() - watcher.last_request > IDLE_EXIT_SECONDS:
+            now = time.time()
+            if now - last > 10:            # the computer slept: give the page a moment to wake before deciding it's gone
+                watcher.last_request = now
+            last = now
+            # a native window quits Mallow itself when it closes; only browser windows need the idle timer
+            if not args.stay and not NATIVE["on"] and now - watcher.last_request > IDLE_EXIT_SECONDS:
                 os._exit(0)
             time.sleep(1.0)
 

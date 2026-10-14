@@ -27,6 +27,7 @@ const settings = {
   sound: store.get('sound', false),
   seeds: store.get('seeds', 0),
   notifyCache: store.get('notifyCache', true),
+  tips: store.get('tips', true),
   focus: '',
 };
 
@@ -762,7 +763,8 @@ async function poll() {
     if (!r.ok) throw new Error('bad');
     const data = await r.json();
     serverOffset = data.now - Date.now() / 1000;
-    const first = liveSeq === null;
+    // a restarted (or newer) Mallow counts events from zero again; don't replay or skip them
+    const first = liveSeq === null || data.seq < liveSeq;
     live = data;
     if (!first) for (const ev of data.events) handleEvent(ev);
     liveSeq = data.seq;
@@ -814,6 +816,7 @@ function renderLive() {
   const f = live.focus;
   const where = f && f.project ? ` in ${base(f.project)}` : '';
   $('#subline').textContent = !f ? 'Watching your Claude Code sessions'
+    : f.quiet ? `Claude is working${where}, or waiting for your OK`
     : f.status === 'working' || f.status === 'thinking' ? `Claude is working${where}`
     : f.status === 'your_turn' ? `Waiting for you${where}` : `Watching your Claude Code sessions`;
   st.dataset.s = f ? f.status : 'idle';
@@ -829,13 +832,61 @@ function renderLive() {
     const j = f.journal;
     $('#journal').innerHTML = [`${j.turns} turn${j.turns === 1 ? '' : 's'}`, `${j.edits} edit${j.edits === 1 ? '' : 's'}`, `${j.commands} command${j.commands === 1 ? '' : 's'}`, j.fixes ? `${j.fixes} bug${j.fixes === 1 ? '' : 's'} squashed` : '', j.files ? `${j.files} file${j.files === 1 ? '' : 's'} touched` : '']
       .filter(Boolean).map((t) => `<span>${esc(t)}</span>`).join('') + '<span class="note" style="background:none;padding:3px 0">this session</span>';
+  } else {
+    $('#sessTitle').textContent = 'No session right now';
+    $('#sessMeta').textContent = 'Start Claude Code in any project and Mallow will notice.';
+    $('#ctxV').textContent = '-'; $('#ctxBar').style.width = '0'; $('#ctxBar').classList.remove('hot');
+    $('#ctxN').textContent = 'How full the conversation is';
+    $('#journal').innerHTML = '';
   }
   renderPicker();
   const crew = live.agents || [];
   $('#crew').innerHTML = crew.map((ag) => `<li>${babyThumb(FUR_LIST[hashNum(ag.id) % FUR_LIST.length], ag.role)}<b>${esc(ROLE_NAMES[ag.role] || 'Helper')}</b><span>${esc(ag.label)}</span></li>`).join('');
   $('#crewEmpty').hidden = crew.length > 0;
   renderAlerts();
+  renderTip();
 }
+
+/* ================================================================ /clear and cold-cache tips */
+const TIP_CLEAR = 100_000;   // a session this big makes every later message expensive
+const TIP_COLD = 40_000;     // below this a cold cache costs little
+let tipKey = null;
+function notifyDesktop(title, body) {
+  if (!settings.notifyCache || document.hasFocus()) return;
+  fetch('/api/notify', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Mallow': '1' },
+    body: JSON.stringify({ title, body }) }).catch(() => {});
+}
+function currentTip() {
+  const f = live && live.focus;
+  if (!f || !settings.tips || !f.ctx) return null;
+  const left = cacheRemaining(), size = kTok(f.ctx);
+  if (f.status !== 'working' && f.status !== 'thinking' && left !== null && left <= 0 && f.ctx >= TIP_COLD) {
+    return { key: `cold:${f.id}:${Math.round(f.cacheExpires || 0)}`,
+      text: `The cache expired, so your next message here re-sends about ${size} tokens at full price. Starting something new? /clear or a new session costs nothing. Coming back to this work? Claude Code may offer to pick up from a summary instead of the full history.` };
+  }
+  if (f.status === 'your_turn' && f.ctx >= TIP_CLEAR) {
+    return { key: `clear:${f.id}:${Math.floor(f.ctx / 75_000)}`, nudge: true,
+      text: `Claude's done. This session sends about ${size} tokens with every message. If your next task is unrelated, type /clear first. It's free, and Claude does better without old context in the way.` };
+  }
+  return null;
+}
+function renderTip() {
+  const t = currentTip(), box = $('#tip');
+  if (!t || store.get('tipsSeen', []).includes(t.key)) { box.hidden = true; tipKey = null; return; }
+  box.hidden = false;
+  if (t.key === tipKey) return;
+  tipKey = t.key;
+  $('#tipText').textContent = t.text;
+  if (t.nudge) {
+    if (!busy()) say('Good moment for a /clear if the next task is something new.', 4500);
+    notifyDesktop('Mallow: a good time to /clear?', `${base(live.focus.project) || 'Your session'} is carrying ${kTok(live.focus.ctx)} tokens. If your next task is unrelated, /clear first.`);
+  }
+}
+$('#tipOk').addEventListener('click', () => {
+  if (!tipKey) return;
+  store.set('tipsSeen', [...store.get('tipsSeen', []), tipKey].slice(-100));
+  $('#tip').hidden = true;
+});
 
 function renderAlerts() {
   const list = (live && live.incidents) || [];
@@ -860,7 +911,7 @@ function cacheTick() {
     const ago = m < 1 ? 'just now' : m < 60 ? `${Math.round(m)} min ago` : h < 24 ? `${Math.round(h)} h ago` : `${Math.round(d)} day${Math.round(d) === 1 ? '' : 's'} ago`;
     $('#cacheV').textContent = 'Cold';
     $('#cacheBar').style.width = '0%';
-    $('#cacheN').textContent = `Expired ${ago}. Your next message re-sends the whole conversation, so a fresh session with a short summary may be cheaper.`;
+    $('#cacheN').textContent = `Expired ${ago}. The next message re-sends the conversation at full price.`;
     box.classList.add('cold');
   }
 }
@@ -889,10 +940,7 @@ function cacheWarning(left, ttl) {
   warnedFor = key;
   const mins = Math.max(1, Math.round(left / 60));
   say(`The cache cools in about ${mins} min. Reply now to keep it cheap.`, 6000);
-  if (settings.notifyCache && !document.hasFocus()) {
-    fetch('/api/notify', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Mallow': '1' },
-      body: JSON.stringify({ title: 'Mallow: cache cooling soon', body: `${base(f.project) || 'Your session'} goes cold in about ${mins} min. Reply now, or let it go and start fresh later.` }) }).catch(() => {});
-  }
+  notifyDesktop('Mallow: cache cooling soon', `${base(f.project) || 'Your session'} goes cold in about ${mins} min. Reply now, or let it go and start fresh later.`);
 }
 
 /* ================================================================ harness panel */
@@ -922,13 +970,14 @@ function renderHarness() {
   for (const c of r.bash.commands) {
     rows += `<li><div class="what"><b>${esc(c.key)}</b><span>Printed about ${kTok(c.avg_tokens)} tokens${c.times > 1 ? `, ${c.times} times` : ''}. Shows the error lines and the last ${c.tail}, and saves the full log.</span></div>${sw(`data-rule="bash" data-key="${esc(c.key)}"`, c.enabled, c.key)}</li>`;
   }
-  if (!r.bash.commands.length) rows += `<li><div class="what"><span>No noisy commands found in your history yet. Mallow adds them here as he spots them.</span></div></li>`;
+  if (!r.bash.commands.length) rows += `<li><div class="what"><span>No long build or test logs in your history yet. Mallow adds them here if he spots any.</span></div></li>`;
   $('#hRules').innerHTML = rows;
+  $('#hTune').innerHTML = (h.tuneups || []).map((t) => `<li><div class="what"><b>${esc(t.title)}${t.recommended ? '<span class="rec">recommended</span>' : ''}</b><span>${esc(t.desc)}</span></div>${sw(`data-tune="${esc(t.id)}"`, t.on, t.title)}</li>`).join('');
   $('#hRecent').innerHTML = st.recent.length ? st.recent.map((e) => {
     const when = new Date(e.ts * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
     const what = e.kind === 'read' ? `read ${base(e.target)} (${e.kept} of ${e.lines.toLocaleString()} lines)` : `${e.target} (errors and last ${e.kept} lines)`;
     return `<li><b>${esc(what)}</b><br>${when}${e.saved ? ` · about ${fmtU(e.saved)} tokens saved` : ''}</li>`;
-  }).join('') : `<li>${h.installed ? 'Nothing trimmed yet.' : 'Turn the harness on and trims show up here.'}</li>`;
+  }).join('') : `<li>${h.installed ? 'Nothing trimmed yet.' : 'Turn trims on and they show up here.'}</li>`;
   const m = h.measure, v = h.verify;
   let mh = '';
   if (m && m.sessions) {
@@ -945,14 +994,16 @@ function renderHarness() {
   $('#hMeasure').innerHTML = mh;
   $('#hMeasure').hidden = !mh;
   $('#hStartup').checked = !!h.startup;
-  $('#hStartup').closest('label').hidden = !String(h.platform).startsWith('win');
+  $('#hStartup').closest('.h-app').hidden = !String(h.platform).startsWith('win');
   $('#hNotify').checked = settings.notifyCache;
+  $('#hNotify').closest('label').hidden = !String(h.platform).startsWith('win');
+  $('#hTips').checked = settings.tips;
 }
 $('#hInstall').addEventListener('click', async () => {
   const was = hState && hState.installed;
   const r = await harnessCall({ action: was ? 'uninstall' : 'install' });
   const msg = $('#hMsg');
-  if (r && !r.ok) { msg.hidden = false; msg.textContent = r.message; return; }
+  if (!r || !r.ok) { msg.hidden = false; msg.textContent = r ? r.message : "Couldn't reach Mallow. Is his window still open?"; return; }
   msg.hidden = false;
   msg.textContent = was ? 'Harness is off. Your Claude Code settings are back to how they were.'
     : 'Harness is on. It takes effect in Claude Code sessions you start from now on. A backup of your settings is in your .mallow folder.';
@@ -966,6 +1017,13 @@ $('#hRules').addEventListener('change', (e) => {
   harnessCall({ action: 'rule', rule: t.dataset.rule, key: t.dataset.key, enabled: t.checked });
 });
 $('#hStartup').addEventListener('change', (e) => harnessCall({ action: 'startup', enabled: e.target.checked }));
+$('#hTune').addEventListener('change', async (e) => {
+  const t = e.target; if (!t.dataset.tune) return;
+  const r = await harnessCall({ action: 'tuneup', id: t.dataset.tune, enabled: t.checked });
+  const msg = $('#tMsg'); msg.hidden = false;
+  msg.textContent = r && !r.ok ? r.message : 'Saved. It applies to Claude Code sessions you start from now on, and your old setting is kept so switching it off puts it back.';
+});
+$('#hTips').addEventListener('change', (e) => { settings.tips = e.target.checked; store.set('tips', settings.tips); renderTip(); });
 $('#hNotify').addEventListener('change', (e) => { settings.notifyCache = e.target.checked; store.set('notifyCache', settings.notifyCache); });
 
 /* ================================================================ report */
@@ -1006,13 +1064,17 @@ const fmtDay = (s) => s ? new Date(s).toLocaleDateString([], { month: 'short', d
 const fmtDur = (m) => m >= 60 ? Math.floor(m / 60) + 'h ' + (m % 60) + 'm' : m + 'm';
 const KIND_ICON = { 'Cold cache': 'other', 'Big tool result': 'read', 'Re-read file': 'read', 'Heavy start': 'plan', 'Long session': 'think', 'Subagent heavy': 'agent' };
 
+const showAll = new Set();     // projects whose full session list is expanded
 function renderReport() {
   const ss = filtered();
   let cost = 0, waste = 0, cr = 0, den = 0;
   ss.forEach((s) => { cost += s.cost; waste += s.waste; cr += s.tok.cr || 0; den += s.den; });
   const hit = den ? cr / den : 0, wr = cost ? waste / cost : 0, score = thrift(hit, wr);
   const label = F.range === 'all' ? 'all time' : `the last ${F.range} days`;
-  $('#repLead').textContent = ss.length ? `${ss.length} session${ss.length === 1 ? '' : 's'} from ${label}. Usage is in relative units: cached reads are cheap, cache writes and output cost more, and bigger models multiply it.` : `No sessions from ${label}.`;
+  const none = !report.sessions.length;
+  $('#repLead').textContent = none ? `No Claude Code sessions yet. Mallow reads them from ${report.root || 'your .claude/projects folder'} as you use Claude Code.`
+    : ss.length ? `${ss.length} session${ss.length === 1 ? '' : 's'} from ${label}. Usage is in relative units: cached reads are cheap, cache writes and output cost more, and bigger models multiply it.`
+    : `No sessions from ${label}${F.q ? ' match your search' : ''}.`;
   $('#dialV').textContent = ss.length ? score : '-';
   $('#dialArc').setAttribute('stroke-dasharray', `${(ss.length ? score : 0) / 100 * 276.5} 277`);
   $('#fHit').textContent = ss.length ? pct(hit) : '-';
@@ -1023,7 +1085,7 @@ function renderReport() {
   const all = []; ss.forEach((s) => s.findings.forEach((f) => all.push([f, s])));
   const top = all.filter(([f]) => f.units > 0).sort((x, y) => y[0].units - x[0].units).slice(0, 8);
   const kinds = {}; all.forEach(([f]) => { kinds[f.kind] = (kinds[f.kind] || 0) + 1; });
-  let h = top.length ? '' : '<div class="box-empty">Nothing big to report here. Mallow approves.</div>';
+  let h = top.length ? '' : `<div class="box-empty">${ss.length ? 'Nothing big to report here. Mallow approves.' : 'Nothing to show yet.'}</div>`;
   top.forEach(([f, s]) => { h += findingHTML(f, s, true); });
   const rest = Object.entries(kinds).filter(([k]) => !top.some(([f]) => f.kind === k));
   if (rest.length) h += `<p class="also">Also seen: ${rest.map(([k, n]) => `${esc(k.toLowerCase())} (${n})`).join(', ')}. Open a session for details.</p>`;
@@ -1032,14 +1094,24 @@ function renderReport() {
   const byP = {}; ss.forEach((s) => (byP[s.project] = byP[s.project] || []).push(s));
   const order = Object.entries(byP).sort((x, y) => y[1].reduce((t, s) => t + s.cost, 0) - x[1].reduce((t, s) => t + s.cost, 0));
   const sorter = { new: (x, y) => Date.parse(y.end) - Date.parse(x.end), cost: (x, y) => y.cost - x.cost, waste: (x, y) => y.waste - x.waste }[F.sort];
-  h = order.length ? '' : '<div class="box-empty">No sessions match. Try a wider range.</div>';
+  const narrowed = F.range !== 'all' || F.q || F.project !== 'all';
+  h = order.length ? '' : `<div class="box-empty">${none ? 'Your sessions will be listed here.' : narrowed ? 'No sessions match. Try a wider range or clear the search.' : 'No sessions to show.'}</div>`;
+  const PAGE = 25;
   order.forEach(([p, list]) => {
     h += `<div class="proj"><div class="proj-head"><h3 title="${esc(p)}">${esc(base(p))}</h3><span class="mini">${fmtU(list.reduce((t, s) => t + s.cost, 0))} units</span><button class="btn small ghost" data-export="${esc(p)}">Export for Claude</button></div>`;
-    list.sort(sorter).forEach((s) => { h += sessionHTML(s); });
+    const sorted = list.sort(sorter), shown = showAll.has(p) ? sorted : sorted.slice(0, PAGE);
+    shown.forEach((s) => { h += sessionHTML(s); });
+    if (shown.length < sorted.length) h += `<button class="btn small ghost more" data-more="${esc(p)}">Show all ${sorted.length} sessions</button>`;
     h += '</div>';
   });
+  // keep open sessions open when the report refreshes
+  const open = new Set([...document.querySelectorAll('details.sess[open]')].map((d) => d.dataset.sid));
   $('#sessions').innerHTML = h;
+  document.querySelectorAll('details.sess').forEach((d) => {
+    if (open.has(d.dataset.sid)) { d.dataset.quiet = '1'; d.open = true; }
+  });
   document.querySelectorAll('details.sess').forEach((d) => d.addEventListener('toggle', () => {
+    if (d.dataset.quiet) { delete d.dataset.quiet; return; }
     if (!d.open) return;
     const s = report.sessions.find((x) => x.id === d.dataset.sid);
     if (s) say(s.findings.length ? `${esc(s.findings[0].detail)}.` : 'That one looks clean.', 3500);
@@ -1082,7 +1154,15 @@ function setRange(v) {
 document.querySelectorAll('#range button').forEach((b) => b.addEventListener('click', () => { setRange(b.dataset.v); renderReport(); }));
 $('#fProject').addEventListener('change', (e) => { F.project = e.target.value; renderReport(); });
 $('#fSort').addEventListener('change', (e) => { F.sort = e.target.value; renderReport(); });
-$('#fQ').addEventListener('input', (e) => { F.q = e.target.value.trim().toLowerCase(); renderReport(); });
+let searchTimer = 0;
+$('#fQ').addEventListener('input', (e) => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => { F.q = e.target.value.trim().toLowerCase(); renderReport(); }, 200);
+});
+$('#sessions').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-more]'); if (!b) return;
+  showAll.add(b.dataset.more); renderReport();
+});
 document.addEventListener('click', (e) => {
   const ex = e.target.closest('[data-export]'); if (ex) { openExport(ex.dataset.export); return; }
   const fd = e.target.closest('button.finding[data-sid]');
@@ -1178,7 +1258,7 @@ async function start() {
   setIdle(1500);
   requestAnimationFrame(frame);
   poll();
-  setInterval(poll, 1000);
+  (async function pollLoop() { await poll(); setTimeout(pollLoop, 1000); })();   // one request at a time
   setInterval(cacheTick, 1000);
   setInterval(() => { applyTheme(false); updateClock(); }, 20000);
   loadReport();

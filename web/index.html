@@ -29,7 +29,7 @@
 
   <section class="stage" aria-label="Mallow's room">
     <div class="scene-wrap" id="sceneWrap">
-      <svg id="scene" viewBox="0 0 1000 428" preserveAspectRatio="xMinYMax slice" role="img" aria-label="Mallow's room">
+      <svg id="scene" viewBox="0 0 1000 428" preserveAspectRatio="xMidYMax slice" role="img" aria-label="Mallow's room">
         <g id="room"></g>
         <g id="wheelLayer"></g>
         <g id="floorLayer"></g>
@@ -64,6 +64,7 @@
         <div class="meter"><div class="l"><span>Context</span><span class="v" id="ctxV">-</span></div><div class="bar"><i id="ctxBar" style="width:0"></i></div><div class="n" id="ctxN">How full the conversation is</div></div>
         <div class="meter" id="cacheBox"><div class="l"><span>Cache</span><span class="v" id="cacheV">-</span></div><div class="bar"><i id="cacheBar" style="width:0"></i></div><div class="n" id="cacheN">Reply before it expires to keep it cheap</div></div>
       </div>
+      <div class="tip" id="tip" role="status" hidden><span id="tipText"></span><button class="btn ghost small" id="tipOk">Got it</button></div>
       <div class="journal" id="journal"></div>
     </div>
     <div class="side">
@@ -80,31 +81,62 @@
   </section>
 
   <section class="card harness" id="harness" aria-labelledby="hTitle">
-    <div class="h-top">
-      <div>
-        <h2 id="hTitle">Harness</h2>
-        <p class="meta" id="hLead">Trims wasteful tool calls in your Claude Code sessions before they run. It never approves anything for you, and it doesn't use any of your usage.</p>
+    <div>
+      <h2 id="hTitle">Usage helpers</h2>
+      <p class="meta">Ways to spend less of your limit without making Claude's work worse. None of them use any usage themselves, and each one can be switched back off.</p>
+    </div>
+
+    <div class="h-block">
+      <div class="h-top">
+        <div>
+          <h3>Reminders</h3>
+          <p class="meta">Mallow points out the moments where a small choice saves a lot: a cache about to go cold, a big session that's ready for /clear, or Claude stuck retrying the same error.</p>
+        </div>
       </div>
-      <div class="h-actions">
-        <span class="h-saved" id="hSaved"></span>
-        <button class="btn" id="hInstall">Turn on</button>
+      <div class="h-foot">
+        <label class="toggle"><input type="checkbox" id="hNotify"> <span>Windows notifications when Mallow's window is in the background</span></label>
+        <label class="toggle"><input type="checkbox" id="hTips"> <span>Show /clear tips for big sessions</span></label>
       </div>
     </div>
-    <div class="h-msg" id="hMsg" hidden></div>
-    <div class="h-measure" id="hMeasure"></div>
-    <div class="h-grid">
-      <div>
-        <h3>Rules</h3>
-        <ul class="rules" id="hRules"></ul>
+
+    <div class="h-block">
+      <div class="h-top">
+        <div>
+          <h3>Claude Code settings</h3>
+          <p class="meta">These cut requests Claude Code makes in the background. They don't change what Claude reads or how it thinks. They apply to sessions you start after switching them.</p>
+        </div>
       </div>
-      <div>
-        <h3>Recent trims</h3>
-        <ul class="trims" id="hRecent"></ul>
+      <ul class="rules" id="hTune"></ul>
+      <div class="h-msg" id="tMsg" role="status" hidden></div>
+    </div>
+
+    <div class="h-block">
+      <div class="h-top">
+        <div>
+          <h3>Trims</h3>
+          <p class="meta" id="hLead">A hook that shortens very large file reads and long build or test logs before they reach Claude. Off unless you turn it on. Check the numbers below first: it only helps if Claude rarely needs the part that was cut.</p>
+        </div>
+        <div class="h-actions">
+          <span class="h-saved" id="hSaved"></span>
+          <button class="btn" id="hInstall">Turn on</button>
+        </div>
+      </div>
+      <div class="h-msg" id="hMsg" role="status" hidden></div>
+      <div class="h-measure" id="hMeasure"></div>
+      <div class="h-grid">
+        <div>
+          <h3>Rules</h3>
+          <ul class="rules" id="hRules"></ul>
+        </div>
+        <div>
+          <h3>Recent trims</h3>
+          <ul class="trims" id="hRecent"></ul>
+        </div>
       </div>
     </div>
-    <div class="h-foot">
+
+    <div class="h-foot h-app">
       <label class="toggle"><input type="checkbox" id="hStartup"> <span>Start Mallow with Windows</span></label>
-      <label class="toggle"><input type="checkbox" id="hNotify"> <span>Notify me before the cache goes cold</span></label>
     </div>
   </section>
 
