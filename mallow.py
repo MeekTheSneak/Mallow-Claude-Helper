@@ -988,7 +988,9 @@ class Harness:
             groups.append({"matcher": "Read|Bash", "hooks": [hook_entry()]})
             hooks["PreToolUse"] = groups
         with self.lock:
-            self.save_rules(self.rules())
+            r = self.rules()
+            r["enabled"] = True                         # turning it on also ends a pause
+            self.save_rules(r)
             return self._edit_settings(change)
 
     def uninstall(self):

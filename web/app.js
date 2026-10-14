@@ -916,7 +916,8 @@ function renderHarness() {
   $('#hInstall').textContent = h.installed ? 'Turn off' : 'Turn on';
   $('#hInstall').classList.toggle('ghost', h.installed);
   const st = h.stats;
-  $('#hSaved').textContent = st.savedWeek ? `Saved about ${fmtU(st.savedWeek)} tokens this week` : (h.installed ? 'On and watching' : '');
+  if (h.installed && !r.enabled) $('#hSaved').innerHTML = `Paused <button class="btn ghost small" id="hResume">Resume</button>`;
+  else $('#hSaved').textContent = st.savedWeek ? `Saved about ${fmtU(st.savedWeek)} tokens this week` : (h.installed ? 'On and watching' : '');
   let rows = `<li><div class="what"><b>Big files are read in parts</b><span>Files over ${Math.round(r.read.min_bytes / 1000)} KB get their first ${r.read.lines} lines, plus a note on how to read more.</span></div>${sw('data-rule="read"', r.read.enabled, 'Big files rule')}</li>`;
   for (const c of r.bash.commands) {
     rows += `<li><div class="what"><b>${esc(c.key)}</b><span>Printed about ${kTok(c.avg_tokens)} tokens${c.times > 1 ? `, ${c.times} times` : ''}. Shows the error lines and the last ${c.tail}, and saves the full log.</span></div>${sw(`data-rule="bash" data-key="${esc(c.key)}"`, c.enabled, c.key)}</li>`;
@@ -925,7 +926,7 @@ function renderHarness() {
   $('#hRules').innerHTML = rows;
   $('#hRecent').innerHTML = st.recent.length ? st.recent.map((e) => {
     const when = new Date(e.ts * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-    const what = e.kind === 'read' ? `read ${base(e.target)} (${e.kept} of ${e.lines.toLocaleString()} lines)` : `${e.target} (last ${e.kept} lines)`;
+    const what = e.kind === 'read' ? `read ${base(e.target)} (${e.kept} of ${e.lines.toLocaleString()} lines)` : `${e.target} (errors and last ${e.kept} lines)`;
     return `<li><b>${esc(what)}</b><br>${when}${e.saved ? ` · about ${fmtU(e.saved)} tokens saved` : ''}</li>`;
   }).join('') : `<li>${h.installed ? 'Nothing trimmed yet.' : 'Turn the harness on and trims show up here.'}</li>`;
   const m = h.measure, v = h.verify;
@@ -956,6 +957,9 @@ $('#hInstall').addEventListener('click', async () => {
   msg.textContent = was ? 'Harness is off. Your Claude Code settings are back to how they were.'
     : 'Harness is on. It takes effect in Claude Code sessions you start from now on. A backup of your settings is in your .mallow folder.';
   if (!was) { hearts(M.actor.x, M.actor.headY()); say('Harness is on. I\'ll trim the noisy stuff.', 3000); }
+});
+$('#hSaved').addEventListener('click', (e) => {
+  if (e.target.id === 'hResume') harnessCall({ action: 'rule', rule: 'all', enabled: true });
 });
 $('#hRules').addEventListener('change', (e) => {
   const t = e.target; if (!t.dataset.rule) return;
