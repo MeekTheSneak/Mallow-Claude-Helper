@@ -58,7 +58,8 @@ The harness is a Claude Code `PreToolUse` hook (`harness.py`). It is off until y
 What it does:
 
 - **Big files are read in parts.** When Claude reads a file over 60 KB with more than 600 lines and no line range, it reads the first 600 lines and gets a one-line note saying how to read more.
-- **Noisy commands keep their tail.** Commands that printed huge output more than once in your own history (a build or test run, say) keep only their last 80 lines. Exit codes are kept, so failures still show as failures. Each command has its own switch.
+- **Build and test logs get shortened.** When a build, test or install command (npm test, cargo build, gradlew, pytest and the like) printed a huge log at least twice before in the same project, Claude sees the lines that mention errors plus the last 60 lines. The full log is saved in `~/.mallow/out` for two days, and Claude is told where, so it can read more without running the command again. Exit codes are kept, so failures still show as failures. Each command has its own switch.
+- **Commands whose output is the point are never touched.** cat, sed, grep, git diff, scripts and anything piped are left alone, because Claude ran them to read that output.
 
 What it never does: approve anything (your permission prompts work exactly as before), change commands that already filter their output, touch background commands, or call a model. If anything goes wrong inside the hook, the tool call goes ahead untouched.
 

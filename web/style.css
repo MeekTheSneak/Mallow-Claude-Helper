@@ -173,10 +173,7 @@ dialog .row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
 .spr{transform-box:fill-box;transform-origin:50% 100%}
 .actor.idle .spr{animation:breathe 2.8s ease-in-out infinite}
 @keyframes breathe{50%{transform:scale(1.02,.975)}}
-.actor.walk .spr{animation:walk .38s ease-in-out infinite}
-@keyframes walk{50%{transform:translateY(-4px) rotate(-1.5deg)}}
-.actor.run .spr{animation:run .3s ease-in-out infinite}
-@keyframes run{50%{transform:translateY(-6px) scale(.97,1.03)}}
+/* walking, running, swinging and the dragon are drawn frame by frame now, so they need no extra bounce */
 .actor.wave .spr{animation:hopsmall .7s ease-in-out infinite}
 @keyframes hopsmall{50%{transform:translateY(-6px)}}
 .actor.cheer .spr{animation:cheer .5s ease-in-out infinite}
@@ -193,13 +190,13 @@ dialog .row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
 @keyframes sleepy{50%{transform:scale(1.03,.96)}}
 .actor.chew .spr{animation:chew .22s ease-in-out infinite}
 @keyframes chew{50%{transform:scale(1.03,.97)}}
-.actor.fight .spr{animation:lunge .72s ease-in-out infinite}
+.actor.baby.fight .spr{animation:lunge .72s ease-in-out infinite}
 @keyframes lunge{40%{transform:translateX(12px) translateY(-6px) rotate(4deg)}60%{transform:translateX(14px)}}
 .actor.alertpose .spr{animation:alertbob 1s ease-in-out infinite}
 @keyframes alertbob{50%{transform:translateY(-4px) rotate(-2deg)}}
 .actor.fade{transition:opacity .5s;opacity:0}
 .dragon.sleep .spr{animation:sleepy 4.2s ease-in-out infinite}
-.dragon.fight .spr{animation:roar .7s ease-in-out infinite}
+
 @keyframes roar{50%{transform:translateX(-6px) scale(1.02,.98)}}
 .dragon.dizzy .spr{animation:wobble 1.2s ease-in-out infinite}
 @keyframes wobble{25%{transform:rotate(-3deg)}75%{transform:rotate(3deg)}}

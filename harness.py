@@ -7,17 +7,25 @@ rewritten calls still go through your normal permission prompts.
 What it does
   Read  of a very large file with no line range  -> reads the first N lines,
         and tells Claude in one line how to read more.
-  Bash  commands Mallow has seen print huge output -> keeps the last N lines.
+  Bash  build, test and install commands that printed huge logs before, in the
+        same project -> Claude sees the lines that mention errors plus the last
+        N lines. The full log is saved to a file Claude can open if it needs more,
+        so it never has to run the command again to see it.
+
+It only ever touches build, test and install style commands (npm test, cargo
+build, gradlew, pytest and the like). Commands whose output is the point, like
+cat, sed, grep, git diff or a script, are never trimmed.
 
 Rules live in ~/.mallow/harness-rules.json (Mallow writes them from your
 history; you can switch each one off in the app). Every change is logged to
-~/.mallow/harness-log.jsonl so the app can show what it saved.
+~/.mallow/harness-log.jsonl so the app can show what it did.
 
 Any error here exits quietly, so the tool call goes ahead untouched.
 """
 import json
 import os
 import re
+import shlex
 import sys
 import time
 from pathlib import Path
@@ -25,17 +33,36 @@ from pathlib import Path
 HOME = Path.home() / ".mallow"
 RULES = HOME / "harness-rules.json"
 LOG = HOME / "harness-log.jsonl"
+OUT = HOME / "out"
 CHARS_PER_TOKEN = 4
+KEEP_LOGS_SECONDS = 2 * 24 * 3600
 
 DEFAULT_RULES = {
     "enabled": True,
     "read": {"enabled": True, "min_bytes": 60000, "lines": 600},
-    "bash": {"enabled": True, "tail": 80, "commands": []},
+    "bash": {"enabled": True, "tail": 60, "commands": []},
 }
 
-# commands the harness never wraps: anything already shaping its own output,
-# running in the background, writing files, or using heredocs
+# Commands that print logs, where the useful part is the errors and the end.
+# program -> allowed first arguments (None means any).
+RUNNERS = {
+    "npm": {"test", "t", "ci", "install", "i", "run"}, "pnpm": {"test", "t", "install", "i", "run"},
+    "yarn": {"test", "install", "run", "build"}, "bun": {"test", "install", "run"},
+    "cargo": {"build", "test", "check", "clippy", "nextest", "bench"},
+    "gradlew": None, "gradle": None, "mvn": None, "mvnw": None, "make": None, "ninja": None,
+    "dotnet": {"build", "test", "restore", "publish"}, "msbuild": None,
+    "go": {"build", "test", "vet"}, "cmake": {"--build"},
+    "pytest": None, "tox": None, "nox": None, "jest": None, "vitest": None, "tsc": None,
+    "eslint": None, "playwright": None,
+    "pip": {"install"}, "pip3": {"install"},
+    "flutter": {"build", "test", "pub"}, "rojo": {"build"},
+    "docker": {"build", "compose"},
+}
+# for "npm run <script>" and friends: only scripts that build or check things
+SCRIPT_OK = re.compile(r"build|test|lint|check|typecheck|compile|verify")
+# never wrap these: they already shape their output, run in the background, write files, or use heredocs
 SKIP_BASH = re.compile(r"\|\s*(tail|head|grep|less|more|wc|jq|sed|awk)\b|(^|[^&])&\s*$|<<|>\s*[^&]|\bwatch\b|\bnohup\b")
+ERROR_WORDS = "error|fail|panic|exception|traceback|fatal"
 
 
 def load_rules():
@@ -59,12 +86,84 @@ def log(entry):
         pass
 
 
-def command_key(cmd):
-    """The part of a command that identifies it: program plus subcommand, ignoring a leading cd."""
-    cmd = cmd.strip()
-    cmd = re.sub(r"^cd\s+\S+\s*&&\s*", "", cmd)
-    parts = cmd.split()
-    return " ".join(parts[:2]) if parts else ""
+def _split(segment):
+    try:
+        return shlex.split(segment.replace("\\", "/"), posix=True)   # Windows paths: keep the separators
+    except ValueError:
+        return segment.split()
+
+
+def runner_key(cmd):
+    """'npm test', 'cargo build', 'gradlew', 'pytest'... for a build/test/install command, else None.
+    A leading 'cd somewhere &&' (or ';'), environment settings and 'timeout N' are ignored.
+    Anything with a pipe, or more than one real command, is left alone."""
+    cmd = (cmd or "").strip()
+    if not cmd or "\n" in cmd or "|" in cmd or "`" in cmd or "$(" in cmd:
+        return None
+    parts = [p.strip() for p in re.split(r"&&|;", cmd) if p.strip()]
+    real = []
+    for p in parts:
+        words = _split(p)
+        while words and re.match(r"^\w+=", words[0]):          # FOO=1 npm test
+            words = words[1:]
+        if words and words[0] not in ("cd", "pushd", "export", "set"):
+            real.append(words)
+    if len(real) != 1:
+        return None
+    words = real[0]
+    if words[:1] == ["timeout"] and len(words) > 2:
+        words = words[2:]
+    if not words:
+        return None
+    prog = re.split(r"[\\/]", words[0])[-1].lower()
+    prog = re.sub(r"\.(exe|bat|cmd)$", "", prog)
+    args = words[1:]
+    if prog in ("python", "python3", "py") and args[:2] == ["-m", "pytest"]:
+        return "pytest"
+    if prog in ("python", "python3", "py") and args[:1] == ["-m"] and args[1:2] == ["pip"] and "install" in args:
+        return "pip install"
+    if prog == "uv" and args[:1] == ["run"] and len(args) > 1:
+        return runner_key(" ".join(args[1:]))
+    if prog == "uv" and args[:1] in (["sync"], ["pip"]):
+        return "uv " + args[0]
+    if prog == "npx" and args:
+        return runner_key(" ".join(args))
+    if prog not in RUNNERS:
+        return None
+    allowed = RUNNERS[prog]
+    if allowed is None:
+        return prog
+    sub = args[0] if args else ""
+    if sub not in allowed:
+        return None
+    if sub == "run":
+        script = args[1] if len(args) > 1 else ""
+        return f"{prog} run {script}" if SCRIPT_OK.search(script) else None
+    return f"{prog} {sub}"
+
+
+def _norm(path):
+    return str(path or "").replace("\\", "/").rstrip("/").lower()
+
+
+def in_projects(cwd, projects):
+    """True when cwd is one of the rule's project folders or inside one. A rule with no projects applies anywhere."""
+    if not projects:
+        return True
+    c = _norm(cwd)
+    return any(c == _norm(p) or c.startswith(_norm(p) + "/") for p in projects)
+
+
+def match_rule(cmd, cwd, rules):
+    """The enabled Bash rule that applies to this command in this folder, or None."""
+    b = rules["bash"]
+    if not b.get("enabled") or not cmd or SKIP_BASH.search(cmd):
+        return None
+    key = runner_key(cmd)
+    if not key:
+        return None
+    return next((c for c in b.get("commands", [])
+                 if c.get("enabled", True) and c.get("key") == key and in_projects(cwd, c.get("projects"))), None)
 
 
 def respond(new_input, note):
@@ -104,24 +203,48 @@ def handle_read(inp, rules, ev):
          "lines": total, "kept": lines, "saved": round(saved)})
 
 
+def _old_logs_cleanup():
+    try:
+        cutoff = time.time() - KEEP_LOGS_SECONDS
+        for f in OUT.glob("*.log"):
+            if f.stat().st_mtime < cutoff:
+                f.unlink()
+    except OSError:
+        pass
+
+
+def wrap_command(cmd, tail, logfile):
+    """The command, run as before, with its full output saved to logfile and a short version shown:
+    lines mentioning errors (up to 40) that fall before the tail, then the last `tail` lines.
+    pipefail keeps the command's own exit code, so Claude still sees failures."""
+    lf = str(logfile).replace("\\", "/")
+    prog = ("{b[NR%T]=$0} n<40 && tolower($0) ~ /" + ERROR_WORDS + "/ {m[++n]=NR; t[n]=$0} "
+            "END{s=1; if(NR>T){c=0; for(i=1;i<=n;i++) if(m[i]<=NR-T){if(!c){print \"[Mallow: earlier lines that mention errors]\"; c=1} print m[i] \": \" t[i]} "
+            "print \"[Mallow: last \" T \" of \" NR \" lines. Full output: " + lf + "]\"; s=NR-T+1} for(i=s;i<=NR;i++) print b[i%T]}")
+    return f"( set -o pipefail; ( {cmd} ) 2>&1 | tee {shlex.quote(lf)} | awk -v T={int(tail)} {shlex.quote(prog)} )"
+
+
 def handle_bash(inp, rules, ev):
-    b = rules["bash"]
-    if not b.get("enabled") or inp.get("run_in_background"):
+    if inp.get("run_in_background"):
         return
-    cmd = inp.get("command") or ""
-    if not cmd.strip() or "\n" in cmd.strip() or SKIP_BASH.search(cmd):
+    cmd = (inp.get("command") or "").strip()
+    rule = match_rule(cmd, ev.get("cwd"), rules)
+    if not rule:
         return
-    key = command_key(cmd)
-    match = next((c for c in b.get("commands", []) if c.get("enabled", True) and c.get("key") == key), None)
-    if not match:
+    tail = int(rule.get("tail") or rules["bash"].get("tail", 60))
+    try:
+        OUT.mkdir(parents=True, exist_ok=True)
+    except OSError:
         return
-    tail = int(match.get("tail") or b.get("tail", 80))
+    _old_logs_cleanup()
+    logfile = OUT / f"{int(time.time() * 1000)}-{re.sub(r'[^a-z0-9]+', '-', rule['key'].lower())}.log"
     new = dict(inp)
-    # a subshell with pipefail keeps the real exit code, so Claude still sees failures
-    new["command"] = f"( set -o pipefail; ( {cmd} ) 2>&1 | tail -n {tail} )"
-    respond(new, f"Mallow: this command usually prints a lot, so only its last {tail} lines are shown.")
-    log({"kind": "bash", "session": ev.get("session_id"), "cwd": ev.get("cwd"), "target": key,
-         "kept": tail, "saved": max(0, round(match.get("avg_tokens", 0) - tail * 30))})
+    new["command"] = wrap_command(cmd, tail, logfile)
+    respond(new, f"Mallow: {rule['key']} usually prints a long log, so you'll see the lines that mention errors "
+                 f"and the last {tail} lines. If you need the rest, Read {str(logfile).replace(chr(92), '/')} "
+                 f"instead of running it again.")
+    log({"kind": "bash", "session": ev.get("session_id"), "cwd": ev.get("cwd"), "target": rule["key"],
+         "kept": tail, "file": str(logfile), "saved": max(0, round(rule.get("avg_tokens", 0) - tail * 30))})
 
 
 def main():

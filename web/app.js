@@ -101,6 +101,8 @@ class PoseStack {
   }
 }
 
+const FRAME_TIMES = { run: [95, 95, 95, 95], walk: [150, 150, 150, 150], fight: [520, 150, 130, 300] };
+
 class Actor {
   constructor(kind, look, id) {
     this.kind = kind;
@@ -113,7 +115,7 @@ class Actor {
     this.shadow = true;
     this.el = document.createElementNS(SVGNS, 'g');
     if (id) this.el.dataset.id = id;
-    this.el.setAttribute('class', 'actor idle');
+    this.el.setAttribute('class', `actor ${kind} idle`);
     this.poses = new PoseStack(this.el);
     // babies go in behind Mallow, so he stays in front when they share the wheel
     const layer = $('#actors');
@@ -124,23 +126,25 @@ class Actor {
     if (c === this.cls) return;
     this.cls = c;
     this.frame = 0;
-    this.el.setAttribute('class', 'actor ' + c);
+    this.el.setAttribute('class', `actor ${this.kind} ${c}`);
   }
   pose(now) {
     const knight = theme === 'knight';
     if (this.kind === 'mallow') return mallowPose(this.look, this.cls, this.frame, now < this.blinkUntil, knight);
-    return babyPose(this.look, this.cls);
+    return babyPose(this.look, this.cls, this.frame);
   }
   wear(pose) {
     const out = [];
+    if (hasOwnHelmet(pose)) return out;
     if (this.kind === 'mallow') {
       if (pose !== 'm-sleep' && this.look.hat && HAT_SPRITE[this.look.hat]) out.push(HAT_SPRITE[this.look.hat]);
     } else if (this.look.gear && GEAR_SPRITE[this.look.gear]) out.push(GEAR_SPRITE[this.look.gear]);
     return out;
   }
   tick(now) {
-    const period = this.cls === 'run' ? 150 : this.cls === 'walk' ? 200 : this.cls === 'fight' ? 360 : 0;
-    if (period && now - this.frameAt > period) { this.frame ^= 1; this.frameAt = now; }
+    // how long each frame of the cycle shows; a swing holds its ready pose, then strikes quickly
+    const times = FRAME_TIMES[this.cls];
+    if (times && now - this.frameAt > times[this.frame % times.length]) { this.frame = (this.frame + 1) % 4; this.frameAt = now; }
     if (this.cls === 'idle' && now > this.nextBlink) { this.blinkUntil = now + 150; this.nextBlink = now + rand(2800, 5600); }
     const pose = this.pose(now), wear = this.wear(pose);
     const key = [pose, this.flip, this.size, wear.join(','), this.shadow].join('|');
@@ -454,9 +458,11 @@ function buildDragon() {
   dragonState('sleep');
 }
 function dragonPose() {
-  if (dragonCur === 'fight') return dragonFrame ? 'd-fire' : 'd-awake';
+  if (dragonCur === 'fight') return SPR['d-battle1'] ? 'd-battle' + (dragonFrame + 1) : (dragonFrame % 2 ? 'd-fire' : 'd-awake');
+  if (dragonCur === 'awake' && SPR['d-battle1']) return 'd-battle1';
   return { sleep: 'd-sleep', dizzy: 'd-dizzy', awake: 'd-awake' }[dragonCur] || 'd-sleep';
 }
+const DRAGON_TIMES = [700, 420, 260, 520];       // ready, breathe in, small flame, big flame
 function renderDragon() {
   if (!dragonEl) return;
   const pose = dragonPose(), k = kFor('dragon');
@@ -471,7 +477,7 @@ function dragonState(s) {
 }
 function dragonTick(now) {
   if (!dragonEl) return;
-  if (dragonCur === 'fight' && now - dragonAt > 700) { dragonFrame ^= 1; dragonAt = now; renderDragon(); }
+  if (dragonCur === 'fight' && now - dragonAt > DRAGON_TIMES[dragonFrame]) { dragonFrame = (dragonFrame + 1) % 4; dragonAt = now; renderDragon(); }
 }
 
 let bugObj = null, bugDismissed = false;
@@ -913,7 +919,7 @@ function renderHarness() {
   $('#hSaved').textContent = st.savedWeek ? `Saved about ${fmtU(st.savedWeek)} tokens this week` : (h.installed ? 'On and watching' : '');
   let rows = `<li><div class="what"><b>Big files are read in parts</b><span>Files over ${Math.round(r.read.min_bytes / 1000)} KB get their first ${r.read.lines} lines, plus a note on how to read more.</span></div>${sw('data-rule="read"', r.read.enabled, 'Big files rule')}</li>`;
   for (const c of r.bash.commands) {
-    rows += `<li><div class="what"><b>${esc(c.key)}</b><span>Printed about ${kTok(c.avg_tokens)} tokens${c.times > 1 ? `, ${c.times} times` : ''}. Keeps the last ${c.tail} lines.</span></div>${sw(`data-rule="bash" data-key="${esc(c.key)}"`, c.enabled, c.key)}</li>`;
+    rows += `<li><div class="what"><b>${esc(c.key)}</b><span>Printed about ${kTok(c.avg_tokens)} tokens${c.times > 1 ? `, ${c.times} times` : ''}. Shows the error lines and the last ${c.tail}, and saves the full log.</span></div>${sw(`data-rule="bash" data-key="${esc(c.key)}"`, c.enabled, c.key)}</li>`;
   }
   if (!r.bash.commands.length) rows += `<li><div class="what"><span>No noisy commands found in your history yet. Mallow adds them here as he spots them.</span></div></li>`;
   $('#hRules').innerHTML = rows;

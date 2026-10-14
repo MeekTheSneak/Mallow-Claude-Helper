@@ -30,22 +30,33 @@ const WEAR = {
   'g-guard': { w: .92, dy: .40 }, 'g-knight': { w: .9, dy: .40 },
   'g-goggles': { w: .80, dy: .45, eyes: true }, 'g-glasses': { w: .78, dy: .46, eyes: true },
   'g-scarf': { w: .80, dy: .66, neck: true }, 'g-bandana': { w: .56, dy: .70, neck: true },
+  // side views (running): drawn facing left like the runners, so they flip with the body
+  'gs-explorer': { w: .94, dy: .31 }, 'gs-hardhat': { w: .84, dy: .30 }, 'gs-cap': { w: .9, dy: .29, dx: -.08 },
+  'gs-guard': { w: .9, dy: .46 }, 'gs-knight': { w: .9, dy: .47 },
+  'gs-goggles': { w: .44, dy: .50, eyes: true, ex: .04 }, 'gs-glasses': { w: .44, dy: .51, eyes: true, ex: .04 },
 };
-/* poses where a raised sword pulls the measured head position sideways: head center as a share of width */
-const HEAD_FIX = { 'k-swing': .57, 'k-victory': .57,
-  // side views face left: the head is toward the front, not in the middle of the body
-  'm-walk1': .38, 'm-walk2': .38, 'm-run1': .38, 'm-run2': .38,
-  'b-ginger-run': .36, 'b-cream-run': .36, 'b-cocoa-run': .36, 'b-smoke-run': .36 };
+/* head center as a share of sprite width, where the measured value is pulled off by a sword or a side view */
+const HEAD_FIX = { 'k-swing': .57, 'k-victory': .57 };
+/* side views: the crown of the head sits this far from the body's anchor, as a share of head width
+   (negative = toward the face). Mallow's body is longer than a baby's, so his head is nearer the middle. */
+const SIDE_HEAD = { m: -.06, b: -.2 };
 const HAT_SPRITE = { party: 'h-party', crown: 'h-crown', flowers: 'h-flowers', bow: 'h-bow', beanie: 'h-beanie', chef: 'h-chef', helmet: 'h-helmet' };
 const GEAR_SPRITE = { explore: 'g-explorer', plan: 'g-hardhat', test: 'g-goggles', review: 'g-glasses', docs: 'g-glasses', dev: 'g-cap', security: 'g-guard', knight: 'g-knight' };
+const SIDE_GEAR = { 'g-explorer': 'gs-explorer', 'g-hardhat': 'gs-hardhat', 'g-cap': 'gs-cap', 'g-guard': 'gs-guard', 'g-knight': 'gs-knight', 'g-goggles': 'gs-goggles', 'g-glasses': 'gs-glasses' };
+
+/* Four-frame cycles from the second art round, with the older two-frame poses as a fallback. */
+function cycle(prefix, frame, old) {
+  const name = prefix + ((frame % 4) + 1);
+  return SPR[name] ? name : old[frame % old.length];
+}
 
 /* Which picture to show for Mallow right now. */
 function mallowPose(look, cls, frame, blink, knight) {
   if (cls === 'sleep' || look.face === 'sleep') return 'm-sleep';
-  if (cls === 'walk') return frame ? 'm-walk2' : 'm-walk1';
-  if (cls === 'run') return frame ? 'm-run2' : 'm-run1';
+  if (cls === 'walk') return cycle('m-walk', frame, ['m-walk1', 'm-walk2']);
+  if (cls === 'run') return cycle('m-run', frame, ['m-run1', 'm-run2']);
   if (knight) {
-    if (cls === 'fight') return frame ? 'k-ready' : 'k-swing';
+    if (cls === 'fight') return cycle('k-swing', frame, ['k-swing', 'k-ready']);
     if (cls === 'cheer' || look.face === 'cheer') return 'k-victory';
     if (look.item === 'sword' && cls === 'groom') return 'k-polish';
     if (cls === 'idle' && !look.item && look.face === 'normal') return blink ? 'm-blink' : 'k-ready';
@@ -63,26 +74,43 @@ function mallowPose(look, cls, frame, blink, knight) {
   return blink ? 'm-blink' : 'm-idle';
 }
 
-function babyPose(look, cls) {
+function babyPose(look, cls, frame = 0) {
   const f = look.fur || 'ginger';
-  if (cls === 'run' || cls === 'walk') return `b-${f}-run`;
+  if (cls === 'run' || cls === 'walk') return cycle(`b-${f}-run`, frame, [`b-${f}-run`]);
   if (cls.startsWith('wave')) return `b-${f}-wave`;
   if (cls === 'fight') return `b-${f}-sword`;
   return `b-${f}-idle`;
 }
 
+/* poses that already have their gear drawn in */
+function hasOwnHelmet(name) { return /^k-swing\d$/.test(name); }
+
+/* the x of the body's fixed point inside a sprite (sequence frames carry one; others use the middle) */
+function anchorOf(spr) { return spr.anchorX != null ? spr.anchorX : spr.w / 2; }
+
 /* An overlay (hat or gear) drawn on a sprite, in the sprite's own local box. */
 function wearMarkup(item, spr, k, w, h, ref, name) {
+  const sideView = spr.facing === 'left' && spr.anchorX != null;     // a running or walking frame
+  const side = sideView && SIDE_GEAR[item] && SPR[SIDE_GEAR[item]];
+  if (side) item = SIDE_GEAR[item];
   const meta = SPR[item], p = WEAR[item];
   if (!meta || !p) return '';
-  if (p.eyes && spr.facing !== 'front') return '';            // glasses only make sense on a front-facing face
+  if (p.eyes && !side && spr.facing !== 'front') return '';    // front glasses only make sense on a front-facing face
   // size and height come from the character's reference pose, so raised arms or a sign don't stretch the hat
   const headW = ref ? ref.headW : spr.headW, refH = (ref ? ref.h : spr.h) * k;
   const iw = headW * k * p.w, ih = iw * meta.h / meta.w;
-  const headX = HEAD_FIX[name] ? HEAD_FIX[name] * spr.w : spr.headX;
-  let cx = (headX - spr.w / 2) * k + (p.dx || 0) * headW * k;
+  const ax = anchorOf(spr);
+  let cx;
+  if (sideView) cx = ((SIDE_HEAD[name[0]] ?? -.15) + (p.dx || 0) + (p.ex || 0)) * headW * k;
+  else {
+    const fix = HEAD_FIX[name] || HEAD_FIX[name.replace(/\d$/, '')];
+    const headX = fix ? fix * spr.w : spr.headX;
+    cx = (headX - ax) * k + (p.dx || 0) * headW * k;
+  }
   if (p.neck) cx = 0;
-  const y = p.eyes || p.neck ? -h + p.dy * refH - ih / 2 : -h + p.dy * refH - ih;
+  const top = -spr.h * k;                     // the sprite's own top, since a running or sitting body is lower than standing
+  const hh = sideView ? spr.h * k : refH;
+  const y = p.eyes || p.neck ? top + p.dy * hh - ih / 2 : top + p.dy * hh - ih;
   return `<image href="sprites/${item}.png" x="${(cx - iw / 2).toFixed(1)}" y="${y.toFixed(1)}" width="${iw.toFixed(1)}" height="${ih.toFixed(1)}"/>`;
 }
 
@@ -91,11 +119,13 @@ function characterMarkup(name, opts) {
   const spr = SPR[name];
   if (!spr) return '';
   const k = opts.k;
-  const w = spr.w * k, h = spr.h * k;
-  const mirror = (spr.facing === 'left' && opts.faceRight) || (spr.facing === 'right' && !opts.faceRight);
-  let s = opts.shadow === false ? '' : `<ellipse class="shadow" cx="0" cy="-1" rx="${(w * .34).toFixed(1)}" ry="${Math.max(3, w * .05).toFixed(1)}"/>`;
+  const w = spr.w * k, h = spr.h * k, ax = anchorOf(spr) * k;
+  const facing = spr.facing;
+  const mirror = (facing === 'left' && opts.faceRight) || (facing === 'right' && !opts.faceRight);
+  const bodyW = Math.min(w, (spr.headW || spr.w) * k * 1.05);
+  let s = opts.shadow === false ? '' : `<ellipse class="shadow" cx="0" cy="-1" rx="${(bodyW * .36).toFixed(1)}" ry="${Math.max(3, bodyW * .06).toFixed(1)}"/>`;
   s += `<g class="spr"><g${mirror ? ' transform="scale(-1 1)"' : ''}>`;
-  s += `<image href="sprites/${name}.png" x="${(-w / 2).toFixed(1)}" y="${(-h).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}"/>`;
+  s += `<image href="sprites/${name}.png" x="${(-ax).toFixed(1)}" y="${(-h).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}"/>`;
   const ref = opts.ref ? SPR[opts.ref] : null;
   for (const item of opts.wear || []) s += wearMarkup(item, spr, k, w, h, ref, name);
   s += `</g></g>`;

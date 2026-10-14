@@ -3,13 +3,19 @@
 Reads the asset pack (PNG sheets + asset-manifest.json), crops every pose to its
 visible pixels, scales it down to app size, and writes web/sprites/*.png plus
 web/sprites/sprites.json with each sprite's size, feet point and head anchors.
-Run:  python tools/build_sprites.py path/to/mallow-assets
+Run:  python tools/build_sprites.py path/to/mallow-assets [path/to/mallow-round-2]
+
+The optional round-2 folder adds the four-frame animations (run, walk, knight swing,
+dragon battle), the wall-mounted bottle, side-view hats and the fixed knight room.
+Those sheets share one grid and ground line, so every frame of a sequence is cut
+with the same box: the character keeps its place and only the drawing changes.
 """
 import json, sys
 from pathlib import Path
 from PIL import Image
 
 SRC = Path(sys.argv[1])
+SRC2 = Path(sys.argv[2]) if len(sys.argv) > 2 else None
 OUT = Path(__file__).resolve().parent.parent / "web" / "sprites"
 OUT.mkdir(parents=True, exist_ok=True)
 manifest = {a["file"]: a for a in json.loads((SRC / "asset-manifest.json").read_text())["assets"]}
@@ -91,8 +97,72 @@ for file, names in NAMES.items():
             save(name, sheet.crop((x, y, x + w, y + h)))
 for file, name in SINGLES.items():
     save(name, Image.open(SRC / file).convert("RGBA"))
+
+# ---- round 2: four-frame sequences cut on a shared box ----------------------------------------
+# sheet -> (sprite name prefix, facing, sprite whose height the first frame should match)
+SEQUENCES = {
+    "mallow-run.png": ("m-run", "left", "m-run1"), "mallow-walk.png": ("m-walk", "left", "m-walk1"),
+    "knight-swing.png": ("k-swing", "right", None), "dragon-battle.png": ("d-battle", "left", None),
+    **{f"baby-run-{f}.png": (f"b-{f}-run", "left", f"b-{f}-run") for f in ("ginger", "cream", "cocoa", "smoke")},
+}
+# sheets with no older pose to match: scale relative to the matched run sheet (set by eye)
+SEQ_SCALE = {"knight-swing.png": 1.2, "dragon-battle.png": 1.4}
+SIDE = {"mounted-water-bottle": "p-bottle", "side-explorer-hat": "gs-explorer", "side-hard-hat": "gs-hardhat",
+        "side-baseball-cap": "gs-cap", "side-guard-helmet": "gs-guard", "side-knight-helmet": "gs-knight",
+        "side-lab-goggles": "gs-goggles", "side-reading-glasses": "gs-glasses", "sunflower-seed": "p-seed"}
+FACING.update({n: "left" for n in SIDE.values() if n.startswith("gs-")})
+SCALE["gs-"] = 0.5
+
+
+def alpha_box(im):
+    return im.getchannel("A").point(lambda v: 255 if v > 16 else 0).getbbox()
+
+
+def save_sequence(file, prefix, facing, match, k=None):
+    m2 = {a["file"]: a for a in json.loads((SRC2 / "round-2-manifest.json").read_text())["assets"]}[file]
+    sheet = Image.open(SRC2 / file).convert("RGBA")
+    cells = [sheet.crop((x, y, x + w, y + h)) for x, y, w, h in (f["sourceRect"] for f in m2["frames"])]
+    ground = m2["frames"][0].get("ground_y", 922)
+    anchor = m2["frames"][0].get("body_anchor_x")
+    boxes = [alpha_box(c) for c in cells]
+    x0 = min(b[0] for b in boxes); y0 = min(b[1] for b in boxes); x1 = max(b[2] for b in boxes)
+    if k is None:                                     # first frame as tall as the older pose it replaces
+        ref_h = meta[match]["h"] - 6 * scale_for(match)
+        k = ref_h / (boxes[0][3] - boxes[0][1])
+    pad = 6
+    for i, c in enumerate(cells):
+        crop = c.crop((x0, y0, x1, ground))           # same box for every frame; bottom edge is the floor
+        canvas = Image.new("RGBA", (crop.width + pad * 2, crop.height + pad), (0, 0, 0, 0))
+        canvas.paste(crop, (pad, pad))
+        canvas = canvas.resize((max(1, round(canvas.width * k)), max(1, round(canvas.height * k))), Image.LANCZOS)
+        name = f"{prefix}{i + 1}"
+        canvas.save(OUT / f"{name}.png", optimize=True)
+        meta[name] = {"w": canvas.width, "h": canvas.height, "facing": facing, **measure(canvas)}
+        if anchor is not None:                        # the body's fixed point, so frames line up when they swap
+            meta[name]["anchorX"] = round((anchor - x0 + pad) * k, 1)
+    return k
+
+
+if SRC2:
+    ks = {}
+    for file, (prefix, facing, match) in SEQUENCES.items():
+        if match:
+            ks[file] = save_sequence(file, prefix, facing, match)
+    base = ks["mallow-run.png"]
+    for file, (prefix, facing, match) in SEQUENCES.items():
+        if not match:
+            ks[file] = save_sequence(file, prefix, facing, None, base * SEQ_SCALE[file])
+    print("sequence scales:", {f: round(v, 3) for f, v in ks.items()})
+    fixes = json.loads((SRC2 / "round-2-manifest.json").read_text())
+    fx = next(a for a in fixes["assets"] if a["file"] == "fixes-props.png")
+    sheet = Image.open(SRC2 / "fixes-props.png").convert("RGBA")
+    for sp in fx["sprites"]:
+        x, y, w, h = sp["sourceRect"]
+        if sp["name"] in SIDE:
+            save(SIDE[sp["name"]], sheet.crop((x, y, x + w, y + h)))
 for room in ("day", "night", "knight"):
-    Image.open(SRC / f"room-{room}.png").convert("RGB").save(OUT / f"room-{room}.jpg", quality=90, optimize=True, progressive=True)
-    meta[f"room-{room}"] = dict(zip(("w", "h"), Image.open(SRC / f"room-{room}.png").size))
+    src = SRC2 / f"room-{room}.png" if SRC2 and (SRC2 / f"room-{room}.png").exists() else SRC / f"room-{room}.png"
+    Image.open(src).convert("RGB").save(OUT / f"room-{room}.jpg", quality=90, optimize=True, progressive=True)
+    meta[f"room-{room}"] = dict(zip(("w", "h"), Image.open(src).size))
 (OUT / "sprites.json").write_text(json.dumps(meta, indent=1))
 print(len(meta), "sprites written to", OUT)

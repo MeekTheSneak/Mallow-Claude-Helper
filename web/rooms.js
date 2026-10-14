@@ -14,7 +14,7 @@ const LAYOUT = {
   },
   knight: {
     floor: 368, back: 340,
-    door: 112, work: 560, dragon: { x: 812, y: 366 }, stroll: [220, 560], badge: [560, 42], sign: 420,
+    door: 112, work: 560, dragon: { x: 840, y: 366 }, stroll: [220, 560], badge: [560, 42], sign: 420,
     bugRange: [180, 420], fightSpots: [494, 638, 448, 404, 362, 322],
   },
 };

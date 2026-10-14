@@ -38,7 +38,7 @@ WEB = Path(getattr(sys, "_MEIPASS", HERE)) / "web"   # also works when bundled i
 STATE_DIR = Path.home() / ".mallow"
 STATE_FILE = STATE_DIR / "state.json"
 DEFAULT_PORT = 47321
-VERSION = 3                      # bumped on each release; a newer Mallow asks an older running one to step aside
+VERSION = 4                      # bumped on each release; a newer Mallow asks an older running one to step aside
 IDLE_EXIT_SECONDS = 180          # quit when no page has asked for anything for this long
 LIVE_WINDOW_SECONDS = 6 * 3600   # files touched this recently are watched live
 
@@ -900,12 +900,15 @@ class Harness:
 
     # -- rules learned from history --
     def learn(self):
-        """Commands whose output was huge, grouped by program + subcommand."""
+        """Build, test and install commands whose logs were huge, per project.
+        Only commands harness.runner_key recognises count: reading commands (cat, sed, grep, git diff, scripts)
+        print what Claude asked to see, so trimming them only sends Claude back for it."""
+        H = harness_module()
         groups = {}
         for s in self.report.get().get("sessions", []):
             for f in s.get("findings", []):
                 if f.get("kind") == "Big tool result" and f.get("tool") == "Bash" and f.get("toks", 0) >= NOISY_MIN_TOKENS:
-                    key = harness_command_key(f.get("target", ""))
+                    key = H.runner_key(f.get("target", ""))
                     if key:
                         g = groups.setdefault(key, {"key": key, "times": 0, "total": 0, "projects": set()})
                         g["times"] += 1
@@ -914,9 +917,9 @@ class Harness:
         out = []
         for g in groups.values():
             avg = g["total"] / g["times"]
-            if g["times"] >= 2 or avg >= 10_000:
+            if g["times"] >= 2:
                 out.append({"key": g["key"], "times": g["times"], "avg_tokens": round(avg),
-                            "projects": sorted(p for p in g["projects"] if p)[:3]})
+                            "projects": sorted(p for p in g["projects"] if p and not p.startswith("("))[:10]})
         return sorted(out, key=lambda c: -c["avg_tokens"] * c["times"])
 
     def rules(self):
@@ -927,13 +930,15 @@ class Harness:
         r.setdefault("enabled", True)
         for k, v in {"enabled": True, "min_bytes": 60000, "lines": 600}.items():
             r.setdefault("read", {}).setdefault(k, v)
-        for k, v in {"enabled": True, "tail": 80, "commands": []}.items():
+        for k, v in {"enabled": True, "tail": 60, "commands": []}.items():
             r.setdefault("bash", {}).setdefault(k, v)
-        known = {c["key"]: c for c in r["bash"].get("commands", [])}
+        H = harness_module()
+        # rules from older Mallow builds matched any command (cat, sed, cd "folder"...); drop those
+        known = {c["key"]: c for c in r["bash"].get("commands", []) if H.runner_key(c.get("key", "")) == c.get("key")}
         for c in self.learn():                         # add new suggestions; keep the user's on/off choices
             old = known.get(c["key"])
             known[c["key"]] = {**c, "enabled": old.get("enabled", True) if old else True,
-                               "tail": (old or {}).get("tail", r["bash"].get("tail", 80))}
+                               "tail": (old or {}).get("tail", r["bash"].get("tail", 60))}
         r["bash"]["commands"] = sorted(known.values(), key=lambda c: -c.get("avg_tokens", 0))
         return r
 
@@ -1081,9 +1086,11 @@ class Harness:
                     chunks = -(-(lines - keep) // keep)
                 elif name == "Bash" and rules["bash"]["enabled"] and not info.get("bg"):
                     cmd = info.get("cmd") or target
-                    rule = next((c for c in rules["bash"]["commands"] if c.get("enabled", True) and c["key"] == H.command_key(cmd)), None)
-                    if rule and not H.SKIP_BASH.search(cmd) and lines > rule.get("tail", 80):
-                        key, keep, note, chunks = rule["key"], rule.get("tail", 80), 25, 1
+                    rule = H.match_rule(cmd, s.cwd, rules)
+                    keep = (rule or {}).get("tail", 60) + 20           # the tail plus a few error lines
+                    if rule and lines > keep:
+                        # if Claude needs more it reads the saved log instead of running the command again
+                        key, note, chunks = rule["key"], 45, 1
                 if not key:
                     continue
                 trimmed = chars * (1 - keep / lines) / CHARS_PER_TOKEN
@@ -1127,15 +1134,17 @@ class Harness:
                 if e["kind"] == "read" and name == "Read" and target == e["target"]:
                     found, at = s.rmeta.get(tid, {}).get("lines", 0) <= e["kept"] + 10, ts
                     break
-                if e["kind"] == "bash" and name == "Bash" and H.command_key(cmd) == e["target"]:
-                    found, at = s.rmeta.get(tid, {}).get("lines", 0) <= e["kept"] + 5, ts
+                if e["kind"] == "bash" and name == "Bash" and H.runner_key(cmd) == e["target"]:
+                    found, at = s.rmeta.get(tid, {}).get("lines", 0) <= e["kept"] + 45, ts
                     break
             if found:
                 # did Claude go back for what was trimmed? (the next 4 calls: same file read again, or same command rerun)
                 nxt = [(s.tools.get(t, ("?", "", 0)), s.tinfo.get(t, {})) for t, c2, t2, sb in s.results
                        if t2 and t2 > at and not sb][:4]
+                logfile = str(e.get("file") or "").replace("\\", "/").lower()
                 if any((n == "Read" and tg == e["target"]) or
-                       (n == "Bash" and (e["kind"] == "bash" and H.command_key(i.get("cmd") or tg) == e["target"]))
+                       (n == "Read" and logfile and str(tg).replace("\\", "/").lower() == logfile) or
+                       (n == "Bash" and (e["kind"] == "bash" and H.runner_key(i.get("cmd") or tg) == e["target"]))
                        for (n, tg, _), i in nxt):
                     res["followedUp"] += 1
             if found is None:
@@ -1158,13 +1167,6 @@ def harness_module():
         sys.path.insert(0, str(HERE))
     import harness
     return harness
-
-
-def harness_command_key(cmd):
-    import re
-    cmd = re.sub(r"^cd\s+\S+\s*&&\s*", "", (cmd or "").strip())
-    parts = cmd.split()
-    return " ".join(parts[:2]) if parts else ""
 
 
 # ===========================================================================
