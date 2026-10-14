@@ -1,0 +1,14 @@
+{
+  "name": "mallow",
+  "description": "Mallow, a hamster companion for Claude Code.",
+  "owner": {
+    "name": "MeekTheSneak"
+  },
+  "plugins": [
+    {
+      "name": "mallow",
+      "source": "./plugin",
+      "description": "A hamster in your Claude Code side pane: he works when Claude works, shows your context, cache and plan limits, and points out where usage is being wasted."
+    }
+  ]
+}

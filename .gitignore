@@ -4,3 +4,4 @@ __pycache__/
 runtime/.ready
 .DS_Store
 Thumbs.db
+plugin/.claude-plugin/types/

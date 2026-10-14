@@ -26,6 +26,28 @@ Double-click **Open Mallow (Mac).command**, or run `python3 mallow.py` in this f
 
 Mallow quits by itself a few minutes after you close its window.
 
+## Mallow in Claude Code's side pane
+
+Mallow also comes as a Claude Code plugin that lives in the side pane, right next to your session. Install it once, at the prompt of a terminal session:
+
+```
+/plugin install mallow --marketplace MeekTheSneak/Mallow-Claude-Helper
+```
+
+Answer `y` to add the marketplace, then pick the user scope so he shows up in every session. From a shell it's `claude plugin install mallow --marketplace MeekTheSneak/Mallow-Claude-Helper`. In the desktop app, where `/plugin` doesn't run: click **+** next to the prompt box, then **Plugins**, **Add marketplace** with `MeekTheSneak/Mallow-Claude-Helper`, then **Add plugin**.
+
+In the pane:
+
+- **The room**, in Day, Night or Knight. Mallow runs his wheel (or fights the dragon) while Claude works, a baby hamster in costume joins for every subagent, and he waves when it's your turn. He naps when you've been away a while.
+- **Your limits.** Context fill, how long the cache stays warm, how much of the last turn came from cache, and your 5-hour and weekly plan limits with their reset times. On the API you see the session's cost instead.
+- **Heads-ups.** A toast and a notification before the cache goes cold, toasts at 80% and 90% context and plan use, a /clear tip when a big session finishes a turn, and an alert when Claude keeps failing the same step, reads the same file again and again, gets a huge tool result, or when prompt caching isn't working at all.
+- **Changed files** with their git status and line counts. Click one to open it.
+- **Mallow himself.** Pet (`p`), feed (`f`), dance (`d`), outfits (`o`), themes (`m`), sound (`s`), file list (`t`). He has a mood, energy that runs down while he works and comes back when he rests, and a streak of days you've worked together.
+
+`/mallow` opens the pane. `/mallow meter`, `/mallow journal`, `/mallow outfit crown`, `/mallow theme knight` and `/mallow sound` do what they say.
+
+The plugin only watches: every tool call, prompt and turn passes through unchanged, it never calls a model, and it adds nothing to what Claude reads. The desktop app is still where the session history, the Export for Claude brief and the usage helpers live. When the app is running, the pane links to it.
+
 ## The room
 
 | You see | It means |
@@ -102,6 +124,7 @@ web/             the page, artwork and fonts
 runtime/python/  Python 3.12 for Windows, with pywebview for the app window
 tools/           build_sprites.py, which cuts new art sheets into web/sprites
 tests/           quick checks: python -m unittest discover tests
+plugin/          the Claude Code side-pane plugin (claude plugin test plugin)
 ```
 
 To swap in new art, put the PNG sheets and `asset-manifest.json` in a folder and run `python tools/build_sprites.py path/to/folder`.

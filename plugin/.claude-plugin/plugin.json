@@ -1,0 +1,9 @@
+{
+  "name": "mallow",
+  "version": "1.0.0",
+  "description": "A hamster in your Claude Code side pane: he works when Claude works, shows your context, cache and plan limits, and points out where usage is being wasted.",
+  "author": { "name": "MeekTheSneak" },
+  "homepage": "https://github.com/MeekTheSneak/Mallow-Claude-Helper",
+  "license": "MIT",
+  "types": "./types/index.d.ts"
+}
