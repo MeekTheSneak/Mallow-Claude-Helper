@@ -1,0 +1,6 @@
+python312.zip
+.
+Lib\site-packages
+
+# Mallow: Lib\site-packages holds pywebview, which gives Mallow its own window.
+# site is left off on purpose so nothing outside this folder is picked up.

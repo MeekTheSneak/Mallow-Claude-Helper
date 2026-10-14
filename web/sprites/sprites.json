@@ -1,0 +1,574 @@
+{
+ "m-idle": {
+  "w": 302,
+  "h": 317,
+  "facing": "front",
+  "headX": 150.7,
+  "headW": 275,
+  "feetX": 150.5
+ },
+ "m-blink": {
+  "w": 302,
+  "h": 317,
+  "facing": "front",
+  "headX": 150.7,
+  "headW": 275,
+  "feetX": 150.5
+ },
+ "m-walk1": {
+  "w": 314,
+  "h": 314,
+  "facing": "left",
+  "headX": 158.8,
+  "headW": 250,
+  "feetX": 225.5
+ },
+ "m-walk2": {
+  "w": 305,
+  "h": 314,
+  "facing": "left",
+  "headX": 158.7,
+  "headW": 250,
+  "feetX": 211.5
+ },
+ "m-run1": {
+  "w": 314,
+  "h": 305,
+  "facing": "left",
+  "headX": 151.7,
+  "headW": 253,
+  "feetX": 173.0
+ },
+ "m-run2": {
+  "w": 308,
+  "h": 312,
+  "facing": "left",
+  "headX": 151.6,
+  "headW": 253,
+  "feetX": 89.5
+ },
+ "m-wave": {
+  "w": 329,
+  "h": 329,
+  "facing": "front",
+  "headX": 172.3,
+  "headW": 300,
+  "feetX": 171.5
+ },
+ "m-cheer": {
+  "w": 348,
+  "h": 329,
+  "facing": "front",
+  "headX": 174.9,
+  "headW": 292,
+  "feetX": 175.5
+ },
+ "m-sleep": {
+  "w": 353,
+  "h": 346,
+  "facing": "front",
+  "headX": 177.7,
+  "headW": 294,
+  "feetX": 197.5
+ },
+ "m-eat": {
+  "w": 334,
+  "h": 326,
+  "facing": "front",
+  "headX": 170.9,
+  "headW": 293,
+  "feetX": 167.5
+ },
+ "m-worried": {
+  "w": 325,
+  "h": 328,
+  "facing": "front",
+  "headX": 162.8,
+  "headW": 290,
+  "feetX": 162.5
+ },
+ "m-alert": {
+  "w": 366,
+  "h": 325,
+  "facing": "front",
+  "headX": 169.6,
+  "headW": 334,
+  "feetX": 161.0
+ },
+ "m-read": {
+  "w": 310,
+  "h": 322,
+  "facing": "front",
+  "headX": 155.8,
+  "headW": 277,
+  "feetX": 153.0
+ },
+ "m-sip": {
+  "w": 317,
+  "h": 319,
+  "facing": "front",
+  "headX": 158.4,
+  "headW": 285,
+  "feetX": 158.5
+ },
+ "m-stretch": {
+  "w": 340,
+  "h": 332,
+  "facing": "front",
+  "headX": 168.8,
+  "headW": 295,
+  "feetX": 162.5
+ },
+ "m-dance": {
+  "w": 333,
+  "h": 325,
+  "facing": "front",
+  "headX": 159.1,
+  "headW": 275,
+  "feetX": 189.0
+ },
+ "k-ready": {
+  "w": 304,
+  "h": 349,
+  "facing": "front",
+  "headX": 154.1,
+  "headW": 285,
+  "feetX": 149.5
+ },
+ "k-swing": {
+  "w": 313,
+  "h": 341,
+  "facing": "front",
+  "headX": 123.1,
+  "headW": 275,
+  "feetX": 166.5
+ },
+ "k-victory": {
+  "w": 325,
+  "h": 343,
+  "facing": "front",
+  "headX": 121.1,
+  "headW": 304,
+  "feetX": 171.0
+ },
+ "k-polish": {
+  "w": 308,
+  "h": 325,
+  "facing": "front",
+  "headX": 154.0,
+  "headW": 276,
+  "feetX": 147.0
+ },
+ "g-explorer": {
+  "w": 198,
+  "h": 125,
+  "facing": "front",
+  "headX": 99.7,
+  "headW": 129,
+  "feetX": 98.0
+ },
+ "g-hardhat": {
+  "w": 180,
+  "h": 130,
+  "facing": "front",
+  "headX": 90.9,
+  "headW": 136,
+  "feetX": 89.0
+ },
+ "g-goggles": {
+  "w": 195,
+  "h": 83,
+  "facing": "front",
+  "headX": 97.2,
+  "headW": 186,
+  "feetX": 97.5
+ },
+ "g-glasses": {
+  "w": 198,
+  "h": 83,
+  "facing": "front",
+  "headX": 98.9,
+  "headW": 182,
+  "feetX": 98.0
+ },
+ "g-cap": {
+  "w": 176,
+  "h": 125,
+  "facing": "front",
+  "headX": 87.8,
+  "headW": 145,
+  "feetX": 87.0
+ },
+ "g-guard": {
+  "w": 192,
+  "h": 148,
+  "facing": "front",
+  "headX": 95.5,
+  "headW": 154,
+  "feetX": 93.0
+ },
+ "g-scarf": {
+  "w": 183,
+  "h": 140,
+  "facing": "front",
+  "headX": 91.1,
+  "headW": 176,
+  "feetX": 95.5
+ },
+ "g-bandana": {
+  "w": 189,
+  "h": 134,
+  "facing": "front",
+  "headX": 127.3,
+  "headW": 178,
+  "feetX": 74.0
+ },
+ "g-knight": {
+  "w": 176,
+  "h": 175,
+  "facing": "front",
+  "headX": 119.3,
+  "headW": 107,
+  "feetX": 79.0
+ },
+ "h-party": {
+  "w": 153,
+  "h": 184,
+  "facing": "front",
+  "headX": 78.8,
+  "headW": 76,
+  "feetX": 75.5
+ },
+ "h-crown": {
+  "w": 196,
+  "h": 135,
+  "facing": "front",
+  "headX": 98.1,
+  "headW": 188,
+  "feetX": 98.0
+ },
+ "h-flowers": {
+  "w": 216,
+  "h": 94,
+  "facing": "front",
+  "headX": 107.3,
+  "headW": 197,
+  "feetX": 107.5
+ },
+ "h-bow": {
+  "w": 206,
+  "h": 150,
+  "facing": "front",
+  "headX": 106.5,
+  "headW": 199,
+  "feetX": 101.0
+ },
+ "h-beanie": {
+  "w": 208,
+  "h": 192,
+  "facing": "front",
+  "headX": 104.9,
+  "headW": 106,
+  "feetX": 102.0
+ },
+ "h-chef": {
+  "w": 216,
+  "h": 167,
+  "facing": "front",
+  "headX": 107.1,
+  "headW": 206,
+  "feetX": 106.0
+ },
+ "h-nightcap": {
+  "w": 228,
+  "h": 154,
+  "facing": "front",
+  "headX": 126.3,
+  "headW": 154,
+  "feetX": 146.5
+ },
+ "d-sleep": {
+  "w": 421,
+  "h": 207,
+  "facing": "left",
+  "headX": 154.4,
+  "headW": 298,
+  "feetX": 348.5
+ },
+ "d-awake": {
+  "w": 378,
+  "h": 327,
+  "facing": "left",
+  "headX": 142.9,
+  "headW": 229,
+  "feetX": 179.0
+ },
+ "d-fire": {
+  "w": 494,
+  "h": 239,
+  "facing": "left",
+  "headX": 191.7,
+  "headW": 273,
+  "feetX": 254.0
+ },
+ "d-dizzy": {
+  "w": 368,
+  "h": 377,
+  "facing": "left",
+  "headX": 146.5,
+  "headW": 215,
+  "feetX": 175.0
+ },
+ "p-house": {
+  "w": 204,
+  "h": 185,
+  "facing": "front",
+  "headX": 103.4,
+  "headW": 183,
+  "feetX": 101.5
+ },
+ "p-bowl": {
+  "w": 206,
+  "h": 153,
+  "facing": "front",
+  "headX": 105.1,
+  "headW": 178,
+  "feetX": 103.0
+ },
+ "p-bottle": {
+  "w": 93,
+  "h": 202,
+  "facing": "front",
+  "headX": 46.0,
+  "headW": 86,
+  "feetX": 67.5
+ },
+ "p-plant": {
+  "w": 195,
+  "h": 202,
+  "facing": "front",
+  "headX": 90.4,
+  "headW": 174,
+  "feetX": 91.5
+ },
+ "p-clock": {
+  "w": 186,
+  "h": 184,
+  "facing": "front",
+  "headX": 93.1,
+  "headW": 171,
+  "feetX": 92.5
+ },
+ "p-beetle": {
+  "w": 206,
+  "h": 135,
+  "facing": "left",
+  "headX": 93.5,
+  "headW": 165,
+  "feetX": 134.0
+ },
+ "p-slime": {
+  "w": 180,
+  "h": 123,
+  "facing": "front",
+  "headX": 91.8,
+  "headW": 132,
+  "feetX": 89.0
+ },
+ "p-seed": {
+  "w": 120,
+  "h": 157,
+  "facing": "front",
+  "headX": 82.9,
+  "headW": 94,
+  "feetX": 61.0
+ },
+ "p-sign": {
+  "w": 135,
+  "h": 181,
+  "facing": "front",
+  "headX": 66.8,
+  "headW": 123,
+  "feetX": 59.5
+ },
+ "b-ginger-idle": {
+  "w": 234,
+  "h": 242,
+  "facing": "front",
+  "headX": 117.4,
+  "headW": 213,
+  "feetX": 116.0
+ },
+ "b-ginger-run": {
+  "w": 241,
+  "h": 222,
+  "facing": "left",
+  "headX": 115.6,
+  "headW": 187,
+  "feetX": 130.0
+ },
+ "b-ginger-wave": {
+  "w": 235,
+  "h": 230,
+  "facing": "front",
+  "headX": 122.5,
+  "headW": 203,
+  "feetX": 117.5
+ },
+ "b-ginger-sword": {
+  "w": 256,
+  "h": 216,
+  "facing": "front",
+  "headX": 113.2,
+  "headW": 229,
+  "feetX": 107.5
+ },
+ "b-cream-idle": {
+  "w": 234,
+  "h": 242,
+  "facing": "front",
+  "headX": 117.6,
+  "headW": 212,
+  "feetX": 116.0
+ },
+ "b-cream-run": {
+  "w": 242,
+  "h": 222,
+  "facing": "left",
+  "headX": 115.9,
+  "headW": 188,
+  "feetX": 130.5
+ },
+ "b-cream-wave": {
+  "w": 236,
+  "h": 230,
+  "facing": "front",
+  "headX": 123.1,
+  "headW": 203,
+  "feetX": 118.5
+ },
+ "b-cream-sword": {
+  "w": 256,
+  "h": 217,
+  "facing": "front",
+  "headX": 113.1,
+  "headW": 229,
+  "feetX": 108.0
+ },
+ "b-cocoa-idle": {
+  "w": 234,
+  "h": 243,
+  "facing": "front",
+  "headX": 117.8,
+  "headW": 214,
+  "feetX": 116.0
+ },
+ "b-cocoa-run": {
+  "w": 242,
+  "h": 222,
+  "facing": "left",
+  "headX": 115.8,
+  "headW": 188,
+  "feetX": 130.5
+ },
+ "b-cocoa-wave": {
+  "w": 236,
+  "h": 230,
+  "facing": "front",
+  "headX": 122.9,
+  "headW": 204,
+  "feetX": 118.0
+ },
+ "b-cocoa-sword": {
+  "w": 257,
+  "h": 218,
+  "facing": "front",
+  "headX": 113.8,
+  "headW": 231,
+  "feetX": 108.5
+ },
+ "b-smoke-idle": {
+  "w": 234,
+  "h": 243,
+  "facing": "front",
+  "headX": 117.7,
+  "headW": 214,
+  "feetX": 116.5
+ },
+ "b-smoke-run": {
+  "w": 243,
+  "h": 222,
+  "facing": "left",
+  "headX": 116.1,
+  "headW": 189,
+  "feetX": 130.5
+ },
+ "b-smoke-wave": {
+  "w": 236,
+  "h": 230,
+  "facing": "front",
+  "headX": 123.3,
+  "headW": 204,
+  "feetX": 118.5
+ },
+ "b-smoke-sword": {
+  "w": 256,
+  "h": 218,
+  "facing": "front",
+  "headX": 112.9,
+  "headW": 230,
+  "feetX": 108.0
+ },
+ "wheel": {
+  "w": 748,
+  "h": 740,
+  "facing": "front",
+  "headX": 373.2,
+  "headW": 717,
+  "feetX": 377.5
+ },
+ "wheel-stand": {
+  "w": 693,
+  "h": 388,
+  "facing": "front",
+  "headX": 346.0,
+  "headW": 234,
+  "feetX": 346.0
+ },
+ "h-helmet": {
+  "w": 488,
+  "h": 359,
+  "facing": "front",
+  "headX": 393.0,
+  "headW": 232,
+  "feetX": 243.5
+ },
+ "icon": {
+  "w": 468,
+  "h": 456,
+  "facing": "front",
+  "headX": 233.7,
+  "headW": 447,
+  "feetX": 232.5
+ },
+ "m-ref": {
+  "w": 605,
+  "h": 622,
+  "facing": "front",
+  "headX": 302.2,
+  "headW": 554,
+  "feetX": 301.5
+ },
+ "room-day": {
+  "w": 1916,
+  "h": 821
+ },
+ "room-night": {
+  "w": 1915,
+  "h": 821
+ },
+ "room-knight": {
+  "w": 1916,
+  "h": 821
+ }
+}

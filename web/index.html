@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en" data-theme="day">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mallow</title>
+<link rel="icon" href="sprites/icon.png" type="image/png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+
+  <header class="top">
+    <div class="brand">
+      <img id="logo" src="sprites/icon.png" width="58" height="58" alt="">
+      <div>
+        <h1>Mallow</h1>
+        <div class="sub" id="subline">Watching your Claude Code sessions</div>
+      </div>
+      <span class="status" id="status" data-s="offline"><i></i><span>Connecting</span></span>
+    </div>
+    <div class="seg" id="themes" role="group" aria-label="Theme">
+      <button data-theme="auto" aria-pressed="true">Auto</button>
+      <button data-theme="day" aria-pressed="false">Day</button>
+      <button data-theme="night" aria-pressed="false">Night</button>
+      <button data-theme="knight" aria-pressed="false">Knight</button>
+    </div>
+  </header>
+
+  <section class="stage" aria-label="Mallow's room">
+    <div class="scene-wrap" id="sceneWrap">
+      <svg id="scene" viewBox="0 0 1000 428" preserveAspectRatio="xMinYMax slice" role="img" aria-label="Mallow's room">
+        <g id="room"></g>
+        <g id="wheelLayer"></g>
+        <g id="floorLayer"></g>
+        <g id="actors"></g>
+        <g id="fx" class="fx"></g>
+      </svg>
+      <div class="badge" id="badge" aria-hidden="true"><span class="ic" id="badgeIcon"></span><span id="badgeText"></span></div>
+      <div class="bubble" id="bubble" role="status" aria-live="polite"></div>
+      <div id="tags"></div>
+    </div>
+    <div class="dock">
+      <button class="pill" id="bPet">Pet <kbd>P</kbd></button>
+      <button class="pill" id="bFeed">Feed <kbd>F</kbd></button>
+      <button class="pill" id="bDance">Dance <kbd>D</kbd></button>
+      <button class="pill" id="bOutfit">Outfit <kbd>O</kbd></button>
+      <button class="pill" id="bSound" aria-pressed="false">Sound off <kbd>S</kbd></button>
+      <span class="spacer"></span>
+      <span class="note" id="seedNote">Click the floor to drop a seed</span>
+    </div>
+  </section>
+
+  <section class="live">
+    <div class="card now">
+      <div class="now-head">
+        <div class="now-title">
+          <h2 id="sessTitle">No session yet</h2>
+          <div class="meta" id="sessMeta">Start Claude Code in any project and Mallow will notice.</div>
+        </div>
+        <label class="picker"><span class="sr">Session to watch</span><select id="sessPick" aria-label="Session to watch"><option value="">Follow the active session</option></select></label>
+      </div>
+      <div class="meters">
+        <div class="meter"><div class="l"><span>Context</span><span class="v" id="ctxV">-</span></div><div class="bar"><i id="ctxBar" style="width:0"></i></div><div class="n" id="ctxN">How full the conversation is</div></div>
+        <div class="meter" id="cacheBox"><div class="l"><span>Cache</span><span class="v" id="cacheV">-</span></div><div class="bar"><i id="cacheBar" style="width:0"></i></div><div class="n" id="cacheN">Reply before it expires to keep it cheap</div></div>
+      </div>
+      <div class="journal" id="journal"></div>
+    </div>
+    <div class="side">
+      <div class="card alert-card" id="alertCard" hidden>
+        <h2>Needs a look</h2>
+        <div class="alerts" id="alerts"></div>
+      </div>
+      <div class="card">
+        <h2>Crew</h2>
+        <ul class="crew" id="crew"></ul>
+        <div class="empty" id="crewEmpty">Baby hamsters show up here when Claude starts subagents or parallel threads.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card harness" id="harness" aria-labelledby="hTitle">
+    <div class="h-top">
+      <div>
+        <h2 id="hTitle">Harness</h2>
+        <p class="meta" id="hLead">Trims wasteful tool calls in your Claude Code sessions before they run. It never approves anything for you, and it doesn't use any of your usage.</p>
+      </div>
+      <div class="h-actions">
+        <span class="h-saved" id="hSaved"></span>
+        <button class="btn" id="hInstall">Turn on</button>
+      </div>
+    </div>
+    <div class="h-msg" id="hMsg" hidden></div>
+    <div class="h-measure" id="hMeasure"></div>
+    <div class="h-grid">
+      <div>
+        <h3>Rules</h3>
+        <ul class="rules" id="hRules"></ul>
+      </div>
+      <div>
+        <h3>Recent trims</h3>
+        <ul class="trims" id="hRecent"></ul>
+      </div>
+    </div>
+    <div class="h-foot">
+      <label class="toggle"><input type="checkbox" id="hStartup"> <span>Start Mallow with Windows</span></label>
+      <label class="toggle"><input type="checkbox" id="hNotify"> <span>Notify me before the cache goes cold</span></label>
+    </div>
+  </section>
+
+  <section class="report" id="report">
+    <h2 class="big">How your sessions went</h2>
+    <p class="lead" id="repLead">Loading your session history.</p>
+    <div class="stats card">
+      <div class="dial">
+        <div class="ring"><svg width="112" height="112" viewBox="0 0 112 112" aria-hidden="true"><circle cx="56" cy="56" r="44" fill="none" stroke="var(--soft)" stroke-width="14"/><circle id="dialArc" cx="56" cy="56" r="44" fill="none" stroke="var(--gold)" stroke-width="14" stroke-linecap="round" stroke-dasharray="0 277" transform="rotate(-90 56 56)"/><circle cx="56" cy="56" r="52" fill="none" stroke="var(--line)" stroke-width="3"/><circle cx="56" cy="56" r="36" fill="none" stroke="var(--line)" stroke-width="3"/></svg><b id="dialV">-</b></div>
+        <div><div class="display" style="font-size:21px">Thrift score</div><div class="note" style="font-size:14px">Mostly cache hits, with some credit for keeping waste low.</div></div>
+      </div>
+      <div class="figs">
+        <div class="fig"><span>Cache hits</span><b id="fHit">-</b></div>
+        <div class="fig"><span>Usage</span><b id="fUse">-</b></div>
+        <div class="fig"><span>Wasted</span><b class="warn" id="fWaste">-</b></div>
+        <div class="fig"><span>Sessions</span><b id="fCount">-</b></div>
+      </div>
+    </div>
+    <div class="controls">
+      <div class="seg" id="range" role="group" aria-label="Date range">
+        <button data-v="7" aria-pressed="false">7d</button><button data-v="30" aria-pressed="true">30d</button><button data-v="90" aria-pressed="false">90d</button><button data-v="all" aria-pressed="false">All</button>
+      </div>
+      <label>Project <select id="fProject"></select></label>
+      <label>Sort <select id="fSort"><option value="new">Newest</option><option value="cost">Most usage</option><option value="waste">Most waste</option></select></label>
+      <label class="grow"><span class="sr">Search sessions</span><input id="fQ" type="search" placeholder="Search sessions"></label>
+      <button class="btn" id="exportAll">Export for Claude</button>
+    </div>
+    <h2 class="big" style="font-size:24px;margin-top:22px">Where usage went</h2>
+    <div class="findings" id="findings"></div>
+    <h2 class="big" style="font-size:24px;margin-top:26px">Sessions</h2>
+    <div id="sessions"></div>
+  </section>
+</div>
+
+<dialog id="exp" aria-labelledby="expTitle">
+  <h3 id="expTitle">Export for Claude</h3>
+  <div class="note" id="expScope"></div>
+  <textarea id="expText" readonly aria-label="Brief for Claude"></textarea>
+  <div class="row">
+    <button class="btn" id="expCopy">Copy</button>
+    <button class="btn ghost" id="expDl">Download .md</button>
+    <button class="btn ghost" id="expClose">Close</button>
+    <span class="ok-msg" id="expOk"></span>
+  </div>
+</dialog>
+
+<script src="art.js"></script>
+<script src="rooms.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

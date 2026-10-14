@@ -1,0 +1,8 @@
+*.bat text eol=crlf
+*.command text eol=lf
+*.py text eol=lf
+runtime/** binary
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff2 binary
