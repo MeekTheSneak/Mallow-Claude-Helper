@@ -38,6 +38,7 @@ WEB = Path(getattr(sys, "_MEIPASS", HERE)) / "web"   # also works when bundled i
 STATE_DIR = Path.home() / ".mallow"
 STATE_FILE = STATE_DIR / "state.json"
 DEFAULT_PORT = 47321
+VERSION = 3                      # bumped on each release; a newer Mallow asks an older running one to step aside
 IDLE_EXIT_SECONDS = 180          # quit when no page has asked for anything for this long
 LIVE_WINDOW_SECONDS = 6 * 3600   # files touched this recently are watched live
 
@@ -1285,7 +1286,7 @@ def make_handler(watcher, report, port, harness):
             path = self.path.split("?", 1)[0]
             query = self.path.split("?", 1)[1] if "?" in self.path else ""
             if path == "/api/ping":
-                return self._send(200, {"app": "mallow"})
+                return self._send(200, {"app": "mallow", "version": VERSION})
             if path == "/api/live":
                 since, want = 0, None
                 for part in query.split("&"):
@@ -1333,6 +1334,10 @@ def make_handler(watcher, report, port, harness):
                 else:
                     ok, msg = False, "unknown action"
                 return self._send(200, {"ok": ok, "message": msg, **harness.state()})
+            if self.path == "/api/quit":                # a newer Mallow is taking over
+                self._send(200, {"ok": True})
+                threading.Timer(0.2, lambda: os._exit(0)).start()
+                return
             if self.path == "/api/notify":
                 notify(str(body.get("title", "Mallow"))[:80], str(body.get("body", ""))[:200])
                 return self._send(200, {"ok": True})
@@ -1346,15 +1351,39 @@ def make_handler(watcher, report, port, harness):
     return Handler
 
 
-def already_running(port):
+def running_version(port):
+    """The version of the Mallow already on this port (0 for builds before versions), or None if it isn't Mallow."""
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/ping", timeout=1) as r:
-            return json.loads(r.read()).get("app") == "mallow"
+            info = json.loads(r.read())
+            return int(info.get("version") or 0) if info.get("app") == "mallow" else None
     except Exception:
-        return False
+        return None
+
+
+def ask_to_quit(port):
+    """Ask an older Mallow to close so this one can take over. True once its port is free."""
+    try:
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/api/quit", data=b"{}", method="POST",
+                                     headers={"X-Mallow": "1", "Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=2).read()
+    except Exception:
+        pass
+    for _ in range(30):
+        time.sleep(0.1)
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            if not sys.platform.startswith("win"):
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s.bind(("127.0.0.1", port))
+                return True
+            except OSError:
+                continue
+    return False
 
 
 def free_port(preferred):
+    """A port to serve on. Negative means the same or a newer Mallow already runs there: just show it."""
     for p in [preferred] + list(range(preferred + 1, preferred + 20)):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             if not sys.platform.startswith("win"):     # a just-closed Mallow may leave the port briefly waiting
@@ -1363,8 +1392,15 @@ def free_port(preferred):
                 s.bind(("127.0.0.1", p))
                 return p
             except OSError:
-                if already_running(p):
-                    return -p
+                pass
+        ver = running_version(p)
+        if ver is None:
+            continue                                   # something else uses this port
+        if ver >= VERSION:
+            return -p
+        if ask_to_quit(p):                             # an older Mallow: replace it
+            return p
+        # a very old Mallow that can't be asked to quit: run beside it on the next free port
     return 0
 
 
